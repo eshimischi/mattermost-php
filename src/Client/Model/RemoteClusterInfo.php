@@ -14,15 +14,20 @@ class RemoteClusterInfo
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): RemoteClusterInfo {
-        $object = new self(
-            display_name: isset($data['display_name']) ? $data['display_name'] : null,
-            create_at: isset($data['create_at']) ? $data['create_at'] : null,
-            last_ping_at: isset($data['last_ping_at']) ? $data['last_ping_at'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return RemoteClusterInfo The hydrated instance
+     */
+    public static function hydrate(?array $data): RemoteClusterInfo
+    {
+        $data ??= [];
+
+        return new self(
+            display_name: $data['display_name'] ?? null,
+            create_at: $data['create_at'] ?? null,
+            last_ping_at: $data['last_ping_at'] ?? null,
         );
-        return $object;
     }
 }

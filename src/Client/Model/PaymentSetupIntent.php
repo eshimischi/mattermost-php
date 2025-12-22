@@ -10,14 +10,19 @@ class PaymentSetupIntent
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): PaymentSetupIntent {
-        $object = new self(
-            id: isset($data['id']) ? $data['id'] : null,
-            client_secret: isset($data['client_secret']) ? $data['client_secret'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return PaymentSetupIntent The hydrated instance
+     */
+    public static function hydrate(?array $data): PaymentSetupIntent
+    {
+        $data ??= [];
+
+        return new self(
+            id: $data['id'] ?? null,
+            client_secret: $data['client_secret'] ?? null,
         );
-        return $object;
     }
 }

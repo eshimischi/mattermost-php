@@ -7,12 +7,17 @@ namespace CedricZiel\MattermostPhp\Client\Model;
  */
 class DefaultInternalServerErrorResponse extends AppError
 {
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): DefaultInternalServerErrorResponse {
-        $object = new self(
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return DefaultInternalServerErrorResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): DefaultInternalServerErrorResponse
+    {
+        $data ??= [];
+
+        return new self(
         );
-        return $object;
     }
 }

@@ -33,6 +33,17 @@ function findClass(PhpNamespace $namespace, string $tag): ?ClassType
     return null;
 }
 
+function findModelClass(PhpNamespace $namespace, string $name): ?ClassType
+{
+    foreach ($namespace->getClasses() as $class) {
+        if ($class->getName() === $name) {
+            return $class;
+        }
+    }
+
+    return null;
+}
+
 $ymlSrc = file_get_contents(__DIR__ . '/../resources/openapi.json');
 $openApi = json_decode($ymlSrc, true);
 
@@ -40,6 +51,98 @@ $printer = new Nette\PhpGenerator\PsrPrinter;
 
 // Track which endpoint classes need MultipartTrait for file uploads
 $classNeedsMultipart = [];
+
+// Track which endpoint classes need FormEncodedTrait for form-urlencoded requests
+$classNeedsFormEncoded = [];
+
+// Track which methods need binary response handling
+$methodNeedsBinaryResponse = [];
+
+/**
+ * Add a type to a union return type, avoiding duplicates.
+ *
+ * @param Method $method The method to update
+ * @param string $newType The type to add
+ */
+function addReturnType(Method $method, string $newType): void
+{
+    $currentReturnType = $method->getReturnType();
+    if ($currentReturnType === null) {
+        $method->setReturnType($newType);
+        return;
+    }
+
+    // Split existing types and check for duplicates
+    $existingTypes = array_map('trim', explode('|', $currentReturnType));
+    $normalizedNew = ltrim($newType, '\\');
+
+    foreach ($existingTypes as $existingType) {
+        $normalizedExisting = ltrim($existingType, '\\');
+        if ($normalizedExisting === $normalizedNew) {
+            return; // Already exists
+        }
+    }
+
+    $method->setReturnType($currentReturnType . '|' . $newType);
+}
+
+/**
+ * Detect the response media type from a response specification.
+ *
+ * @param array $responseSpec The response specification from OpenAPI
+ * @return array{type: string, mediaType: ?string, schema?: array}
+ */
+function detectResponseMediaType(array $responseSpec): array
+{
+    if (!isset($responseSpec['content'])) {
+        // Check description for hints about binary content
+        $desc = strtolower($responseSpec['description'] ?? '');
+        if (str_contains($desc, 'image') || str_contains($desc, 'file') ||
+            str_contains($desc, 'icon') || str_contains($desc, 'thumbnail') ||
+            str_contains($desc, 'preview') || str_contains($desc, 'download') ||
+            str_contains($desc, 'binary')) {
+            return ['type' => 'binary', 'mediaType' => 'application/octet-stream'];
+        }
+        return ['type' => 'void', 'mediaType' => null];
+    }
+
+    $contentTypes = array_keys($responseSpec['content']);
+    if (empty($contentTypes)) {
+        return ['type' => 'void', 'mediaType' => null];
+    }
+
+    $primaryType = $contentTypes[0];
+
+    // Image types
+    if (str_starts_with($primaryType, 'image/')) {
+        return ['type' => 'binary', 'mediaType' => $primaryType];
+    }
+
+    // Text/plain - check if it's binary format
+    if ($primaryType === 'text/plain') {
+        $schema = $responseSpec['content'][$primaryType]['schema'] ?? [];
+        if (($schema['format'] ?? '') === 'binary') {
+            return ['type' => 'binary', 'mediaType' => $primaryType];
+        }
+        return ['type' => 'text', 'mediaType' => $primaryType];
+    }
+
+    // JSON
+    if ($primaryType === 'application/json') {
+        return [
+            'type' => 'json',
+            'mediaType' => $primaryType,
+            'schema' => $responseSpec['content'][$primaryType]['schema'] ?? [],
+        ];
+    }
+
+    // Binary/octet-stream
+    if ($primaryType === 'application/octet-stream' || $primaryType === 'application/zip') {
+        return ['type' => 'binary', 'mediaType' => $primaryType];
+    }
+
+    return ['type' => 'unknown', 'mediaType' => $primaryType];
+}
 
 $endpointNamespaceName = 'CedricZiel\MattermostPhp\Client\Endpoint';
 $modelNamespaceName = 'CedricZiel\MattermostPhp\Client\Model';
@@ -175,38 +278,50 @@ function createHydrationMethod(PhpNamespace $modelNamespace, ClassType $class): 
 {
     $hydrationMethod = $class->addMethod('hydrate')
         ->setReturnType($modelNamespace->getName() . '\\' . $class->getName())
-        ->setStatic();
+        ->setStatic()
+        ->addComment('Hydrate a new instance from an array of data.')
+        ->addComment('')
+        ->addComment('@param array<string, mixed>|null $data The data to hydrate from')
+        ->addComment('@return ' . $class->getName() . ' The hydrated instance');
 
-    $dataParameter = $hydrationMethod->addParameter('data')
+    $hydrationMethod->addParameter('data')
         ->setType('array')
-        ->setNullable()
-        ->setComment('@param array<string, mixed> $data');
+        ->setNullable();
 
-    $hydrationMethod->addBody('$object = new self(');
+    $hydrationMethod->addBody('$data ??= [];');
+    $hydrationMethod->addBody('');
+    $hydrationMethod->addBody('return new self(');
 
     if ($class->hasMethod('__construct')) {
         if ($class->getExtends() !== null) {
-            $hydrationMethod->addBody(implode("\n", array_map(function ($property) {
-                if ($property->getType() === 'stdClass') {
-                    return sprintf('    %s: isset($data[\'%s\']) ? (object) $data[\'%s\'] : null,', $property->getName(), $property->getName(), $property->getName());
-                }
+            // Extract just the class name from the fully qualified name
+            $extendsName = $class->getExtends();
+            if (str_contains($extendsName, '\\')) {
+                $parts = explode('\\', $extendsName);
+                $extendsName = end($parts);
+            }
+            $parentClass = findModelClass($modelNamespace, $extendsName);
+            if ($parentClass !== null && $parentClass->hasMethod('__construct')) {
+                $hydrationMethod->addBody(implode("\n", array_map(function ($property) {
+                    if (str_contains($property->getType() ?? '', 'stdClass')) {
+                        return sprintf('    %s: isset($data[\'%s\']) ? (object) $data[\'%s\'] : null,', $property->getName(), $property->getName(), $property->getName());
+                    }
 
-                return sprintf('    %s: isset($data[\'%s\']) ? isset($data[\'%s\']) : null,', $property->getName(), $property->getName(), $property->getName());
-            }, findClass($modelNamespace,$class->getExtends())->getMethod('__construct')?->getParameters() ?? [])));
+                    return sprintf('    %s: $data[\'%s\'] ?? null,', $property->getName(), $property->getName());
+                }, $parentClass->getMethod('__construct')->getParameters())));
+            }
         }
 
         $hydrationMethod->addBody(implode("\n", array_map(function ($property) {
-            if ($property->getType() === 'stdClass') {
+            if (str_contains($property->getType() ?? '', 'stdClass')) {
                 return sprintf('    %s: isset($data[\'%s\']) ? (object) $data[\'%s\'] : null,', $property->getName(), $property->getName(), $property->getName());
             }
 
-            return sprintf('    %s: isset($data[\'%s\']) ? $data[\'%s\'] : null,', $property->getName(), $property->getName(),  $property->getName());
+            return sprintf('    %s: $data[\'%s\'] ?? null,', $property->getName(), $property->getName());
         }, $class->getMethod('__construct')?->getParameters())));
     }
 
     $hydrationMethod->addBody(');');
-
-    $hydrationMethod->addBody('return $object;');
 
     return $hydrationMethod;
 }
@@ -214,73 +329,131 @@ function createHydrationMethod(PhpNamespace $modelNamespace, ClassType $class): 
 function createHydrationMethodForArrayBody(PhpNamespace $modelNamespace, ClassType $class, string $itemType): Method
 {
     $hydrationMethod = createHydrationMethod($modelNamespace, $class);
-    $hydrationMethod->setBody('$object = new self(' . PHP_EOL);
+    // Reset body but preserve null safety
+    $hydrationMethod->setBody('$data ??= [];' . PHP_EOL);
+    $hydrationMethod->addBody('');
+    $hydrationMethod->addBody('return new self(');
 
-    $hydrationMethod->addBody('    items: array_map(function ($item) {');
-    $hydrationMethod->addBody(sprintf('    return %s::hydrate($item);', $itemType));
-    $hydrationMethod->addBody('    }, $data[\'items\'] ?? []),');
+    $hydrationMethod->addBody(sprintf('    items: array_map(%s::hydrate(...), $data[\'items\'] ?? []),', $itemType));
 
     $hydrationMethod->addBody(');');
-    $hydrationMethod->addBody('return $object;');
+
+    return $hydrationMethod;
+}
+
+function createHydrationMethodForAllOf(PhpNamespace $modelNamespace, ClassType $class, ?string $parentClass, array $additionalProperties): Method
+{
+    $hydrationMethod = $class->addMethod('hydrate')
+        ->setReturnType($modelNamespace->getName() . '\\' . $class->getName())
+        ->setStatic()
+        ->addComment('Hydrate a new instance from an array of data.')
+        ->addComment('')
+        ->addComment('@param array<string, mixed>|null $data The data to hydrate from')
+        ->addComment('@return ' . $class->getName() . ' The hydrated instance');
+
+    $hydrationMethod->addParameter('data')
+        ->setType('array')
+        ->setNullable();
+
+    $hydrationMethod->addBody('$data ??= [];');
+    $hydrationMethod->addBody('');
+    $hydrationMethod->addBody('return new self(');
+
+    // First, add parent class constructor parameters if there's a parent
+    if ($parentClass !== null) {
+        $parentClassName = str_replace('\\' . $modelNamespace->getName() . '\\', '', $parentClass);
+        $parentClassType = findModelClass($modelNamespace, $parentClassName);
+        if ($parentClassType !== null && $parentClassType->hasMethod('__construct')) {
+            foreach ($parentClassType->getMethod('__construct')->getParameters() as $parameter) {
+                $paramName = $parameter->getName();
+                if (str_contains($parameter->getType() ?? '', 'stdClass')) {
+                    $hydrationMethod->addBody(sprintf('    %s: isset($data[\'%s\']) ? (object) $data[\'%s\'] : null,', $paramName, $paramName, $paramName));
+                } else {
+                    $hydrationMethod->addBody(sprintf('    %s: $data[\'%s\'] ?? null,', $paramName, $paramName));
+                }
+            }
+        }
+    }
+
+    // Then add additional properties from allOf
+    foreach ($additionalProperties as $propertyName => $property) {
+        if (false === \Nette\PhpGenerator\Helpers::isIdentifier($propertyName)) {
+            continue;
+        }
+
+        // Check if this is a reference to another model
+        if (isset($property['$ref'])) {
+            $refType = str_replace('#/components/schemas/', '', $property['$ref']);
+            $hydrationMethod->addBody(sprintf('    %s: isset($data[\'%s\']) ? %s::hydrate($data[\'%s\']) : null,', $propertyName, $propertyName, $refType, $propertyName));
+        } else {
+            $hydrationMethod->addBody(sprintf('    %s: $data[\'%s\'] ?? null,', $propertyName, $propertyName));
+        }
+    }
+
+    $hydrationMethod->addBody(');');
 
     return $hydrationMethod;
 }
 
 function createClassFromSchema(PhpNamespace $modelNamespace, string $schemaName, array $schema): ClassType {
-    $class = findClass($modelNamespace, $schemaName);
+    $class = findModelClass($modelNamespace, $schemaName);
     if ($class === null) $class = $modelNamespace->addClass($schemaName);
 
-    $constructor = $class->hasMethod('__construct') ? $class->getMethod('__construct') : $class->addMethod('__construct');
+    // Helper to get or create constructor lazily
+    $getConstructor = function() use ($class): Method {
+        return $class->hasMethod('__construct') ? $class->getMethod('__construct') : $class->addMethod('__construct');
+    };
 
     if (isset($schema['description'])) {
         $class->setComment($schema['description']);
     }
 
     if (isset($schema['properties'])) {
-        // store properties
+        // store properties, filtering to only valid identifiers
         $properties = ['required' => [], 'optional' => []];
         foreach ($schema['properties'] as $propertyName => $property) {
+            if (false === \Nette\PhpGenerator\Helpers::isIdentifier($propertyName)) {
+                continue;
+            }
             $propertyIsRequired = !isset($property['required']) || in_array($propertyName, $property['required']) === false;
             $properties[$propertyIsRequired ? 'optional' : 'required'][] = $propertyName;
         }
 
-        // add properties
-        foreach ($properties['required'] as $propertyName) {
-            if (false === \Nette\PhpGenerator\Helpers::isIdentifier($propertyName)) {
-                continue;
+        // Only create constructor if there are valid properties
+        if (!empty($properties['required']) || !empty($properties['optional'])) {
+            $constructor = $getConstructor();
+
+            // add required properties
+            foreach ($properties['required'] as $propertyName) {
+                $property = $schema['properties'][$propertyName];
+                $p = $constructor->addPromotedParameter($propertyName);
+                $p->setType(isset($property['type']) ? mapParameterType($property['type']) : null);
+                $p->setComment($property['description'] ?? null)->setNullable(false);
+
+                if (isset($property['default'])) {
+                    $p->setDefaultValue($property['default']);
+                }
             }
 
-            $property = $schema['properties'][$propertyName];
-            $p = $constructor->addPromotedParameter($propertyName);
-            $p->setType(isset($property['type']) ? mapParameterType($property['type']) : null);
-            $p->setComment($property['description'] ?? null)->setNullable(false);
+            // add optional properties
+            foreach ($properties['optional'] as $propertyName) {
+                $property = $schema['properties'][$propertyName];
+                $p = $constructor->addPromotedParameter($propertyName);
+                $p->setType(isset($property['type']) ? mapParameterType($property['type']) : null);
+                $p->setComment($property['description'] ?? null)->setNullable(true);
 
-            if (isset($property['default'])) {
-                $p->setDefaultValue($property['default']);
+                if (isset($property['default'])) {
+                    $p->setDefaultValue($property['default']);
+                } else {
+                    $p->setDefaultValue(null);
+                }
             }
+
+            $hydrationMethod = createHydrationMethod($modelNamespace, $class);
         }
-
-        foreach ($properties['optional'] as $propertyName) {
-            if (false === \Nette\PhpGenerator\Helpers::isIdentifier($propertyName)) {
-                continue;
-            }
-
-            $property = $schema['properties'][$propertyName];
-            $p = $constructor->addPromotedParameter($propertyName);
-            $p->setType(isset($property['type']) ? mapParameterType($property['type']) : null);
-            $p->setComment($property['description'] ?? null)->setNullable(true);
-
-            if (isset($property['default'])) {
-                $p->setDefaultValue($property['default']);
-            } else {
-                $p->setDefaultValue(null);
-            }
-        }
-
-        $hydrationMethod = createHydrationMethod($modelNamespace, $class);
     } elseif (isset($schema['type']) && $schema['type'] === 'array' && isset($schema['items']['$ref'])) {
         $itemType = '\\' . $modelNamespace->getName() . '\\' . str_replace('#/components/schemas/', '', $schema['items']['$ref']);
-        $constructor
+        $getConstructor()
             ->addPromotedParameter('items')
             ->setType('array')
             ->setComment(sprintf('@var %s[]', $itemType))
@@ -290,22 +463,91 @@ function createClassFromSchema(PhpNamespace $modelNamespace, string $schemaName,
         $class->addImplement('\\JsonSerializable');
         $jsonSerialize = $class->addMethod('jsonSerialize');
         $jsonSerialize->setReturnType('array');
-        $jsonSerialize->addBody('return array_map(function ($item) {');
-        $jsonSerialize->addBody('    if ($item instanceof \JsonSerializable) {');
-        $jsonSerialize->addBody('      return $item->jsonSerialize();');
-        $jsonSerialize->addBody('    }');
-        $jsonSerialize->addBody('    return $item;');
-        $jsonSerialize->addBody('}, $this->items);');
+        $jsonSerialize->addBody('return array_map(fn(mixed $item): mixed => $item instanceof \JsonSerializable ? $item->jsonSerialize() : $item, $this->items);');
     } elseif (isset($schema['allOf'])) {
+        $constructor = $getConstructor();
+        $parentClass = null;
+        $parentClassName = null;
+        $additionalProperties = [];
+
         foreach ($schema['allOf'] as $i => $allOf) {
-            // class extends another object (allOf)
+            // class extends another object (allOf with $ref)
             if (isset($allOf['$ref'])) {
                 $itemType = '\\' . $modelNamespace->getName() . '\\' . str_replace('#/components/schemas/', '', $allOf['$ref']);
-
-                $class
-                    ->setExtends($itemType);
+                $parentClass = $itemType;
+                $parentClassName = str_replace('#/components/schemas/', '', $allOf['$ref']);
+                $class->setExtends($itemType);
+            }
+            // additional properties in allOf
+            elseif (isset($allOf['type']) && $allOf['type'] === 'object' && isset($allOf['properties'])) {
+                foreach ($allOf['properties'] as $propertyName => $property) {
+                    $additionalProperties[$propertyName] = $property;
+                }
             }
         }
+
+        // Add parent class constructor parameters to the child constructor
+        $parentConstructorParams = [];
+        if ($parentClassName !== null) {
+            $parentClassType = findModelClass($modelNamespace, $parentClassName);
+            if ($parentClassType !== null && $parentClassType->hasMethod('__construct')) {
+                foreach ($parentClassType->getMethod('__construct')->getParameters() as $parentParam) {
+                    $paramName = $parentParam->getName();
+                    $parentConstructorParams[] = $paramName;
+
+                    $p = $constructor->addParameter($paramName);
+                    $p->setType($parentParam->getType());
+                    $p->setNullable(true);
+                    $p->setDefaultValue(null);
+                }
+            }
+        }
+
+        // Add additional properties from allOf to constructor
+        foreach ($additionalProperties as $propertyName => $property) {
+            if (false === \Nette\PhpGenerator\Helpers::isIdentifier($propertyName)) {
+                continue;
+            }
+
+            // Determine the type - could be a $ref to another model
+            $propertyType = null;
+            if (isset($property['$ref'])) {
+                $propertyType = '\\' . $modelNamespace->getName() . '\\' . str_replace('#/components/schemas/', '', $property['$ref']);
+            } elseif (isset($property['type'])) {
+                $propertyType = mapParameterType($property['type']);
+            }
+
+            $p = $constructor->addPromotedParameter($propertyName);
+            $p->setType($propertyType);
+            $p->setComment($property['description'] ?? null)->setNullable(true);
+            $p->setDefaultValue(null);
+        }
+
+        // Add parent::__construct() call to constructor body
+        if (!empty($parentConstructorParams)) {
+            $parentCallParams = implode(', ', array_map(fn($p) => $p . ': $' . $p, $parentConstructorParams));
+            $constructor->addBody('parent::__construct(' . $parentCallParams . ');');
+        }
+
+        // Create hydration method for allOf classes
+        $hydrationMethod = createHydrationMethodForAllOf($modelNamespace, $class, $parentClass, $additionalProperties);
+    }
+
+    // Create a simple hydrate method if one wasn't created yet (for empty classes)
+    if (!$class->hasMethod('hydrate')) {
+        $hydrationMethod = $class->addMethod('hydrate')
+            ->setReturnType($modelNamespace->getName() . '\\' . $class->getName())
+            ->setStatic()
+            ->addComment('Hydrate a new instance from an array of data.')
+            ->addComment('')
+            ->addComment('@param array<string, mixed>|null $data The data to hydrate from')
+            ->addComment('@return ' . $class->getName() . ' The hydrated instance');
+
+        $hydrationMethod->addParameter('data')
+            ->setType('array')
+            ->setNullable();
+
+        $hydrationMethod->addBody('return new self();');
     }
 
     return $class;
@@ -343,7 +585,11 @@ foreach ($openApi['components']['responses'] as $schemaName => $schema) {
 function createRequestBodyModelClassFromSchema(PhpNamespace $modelNamespace, string $operationId, array $schema): ClassType
 {
     $class = $modelNamespace->addClass($operationId . 'Request');
-    $constructor = $class->addMethod('__construct');
+
+    // Helper to get or create constructor lazily
+    $getConstructor = function() use ($class): Method {
+        return $class->hasMethod('__construct') ? $class->getMethod('__construct') : $class->addMethod('__construct');
+    };
 
     if (isset($schema['type']) && $schema['type'] === 'array') {
         if (!isset($schema['items']) || !is_array($schema['items'])) {
@@ -351,7 +597,7 @@ function createRequestBodyModelClassFromSchema(PhpNamespace $modelNamespace, str
         }
 
         $itemsType = isset($schema['items']['type']) ? mapParameterType($schema['items']['type']) : null;
-        $cp = $constructor->addPromotedParameter('items')
+        $cp = $getConstructor()->addPromotedParameter('items')
             ->setType('array')
             ->setComment(sprintf('@var %s[]', $itemsType))
             ->addComment($schema['items']['description'] ?? '')
@@ -360,54 +606,50 @@ function createRequestBodyModelClassFromSchema(PhpNamespace $modelNamespace, str
         $class->addImplement('\\JsonSerializable');
         $jsonSerialize = $class->addMethod('jsonSerialize');
         $jsonSerialize->setReturnType('array');
-        $jsonSerialize->addBody('return array_map(function ($item) {');
-        $jsonSerialize->addBody('    if ($item instanceof \JsonSerializable) {');
-        $jsonSerialize->addBody('      return $item->jsonSerialize();');
-        $jsonSerialize->addBody('    }');
-        $jsonSerialize->addBody('    return $item;');
-        $jsonSerialize->addBody('}, $this->items);');
+        $jsonSerialize->addBody('return array_map(fn(mixed $item): mixed => $item instanceof \JsonSerializable ? $item->jsonSerialize() : $item, $this->items);');
     } elseif (isset($schema['type']) && $schema['type'] === 'object') {
         if (!isset($schema['properties']) || !is_array($schema['properties'])) {
             return $class;
         }
 
-        // store properties
+        // store properties, filtering to only valid identifiers
         $properties = ['required' => [], 'optional' => []];
         foreach ($schema['properties'] as $propertyName => $property) {
+            if (false === \Nette\PhpGenerator\Helpers::isIdentifier($propertyName)) {
+                continue;
+            }
             $propertyIsRequired = !isset($schema['required']) || in_array($propertyName, $schema['required']) === false;
             $properties[$propertyIsRequired ? 'optional' : 'required'][] = $propertyName;
         }
 
-        // add properties
-        foreach ($properties['required'] as $propertyName) {
-            if (false === \Nette\PhpGenerator\Helpers::isIdentifier($propertyName)) {
-                continue;
+        // Only create constructor if there are valid properties
+        if (!empty($properties['required']) || !empty($properties['optional'])) {
+            $constructor = $getConstructor();
+
+            // add required properties
+            foreach ($properties['required'] as $propertyName) {
+                $property = $schema['properties'][$propertyName];
+                $p = $constructor->addPromotedParameter($propertyName);
+                $p->setType(isset($property['type']) ? mapParameterType($property['type']) : null);
+                $p->setComment($property['description'] ?? null)->setNullable(false);
+
+                if (isset($property['default'])) {
+                    $p->setDefaultValue($property['default']);
+                }
             }
 
-            $property = $schema['properties'][$propertyName];
-            $p = $constructor->addPromotedParameter($propertyName);
-            $p->setType(isset($property['type']) ? mapParameterType($property['type']) : null);
-            $p->setComment($property['description'] ?? null)->setNullable(false);
+            // add optional properties
+            foreach ($properties['optional'] as $propertyName) {
+                $property = $schema['properties'][$propertyName];
+                $p = $constructor->addPromotedParameter($propertyName);
+                $p->setType(isset($property['type']) ? mapParameterType($property['type']) : null);
+                $p->setComment($property['description'] ?? null)->setNullable(true);
 
-            if (isset($property['default'])) {
-                $p->setDefaultValue($property['default']);
-            }
-        }
-
-        foreach ($properties['optional'] as $propertyName) {
-            if (false === \Nette\PhpGenerator\Helpers::isIdentifier($propertyName)) {
-                continue;
-            }
-
-            $property = $schema['properties'][$propertyName];
-            $p = $constructor->addPromotedParameter($propertyName);
-            $p->setType(isset($property['type']) ? mapParameterType($property['type']) : null);
-            $p->setComment($property['description'] ?? null)->setNullable(true);
-
-            if (isset($property['default'])) {
-                $p->setDefaultValue($property['default']);
-            } else {
-                $p->setDefaultValue(null);
+                if (isset($property['default'])) {
+                    $p->setDefaultValue($property['default']);
+                } else {
+                    $p->setDefaultValue(null);
+                }
             }
         }
     }
@@ -452,6 +694,9 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
 
         $isMultipartRequest = false;
         $multipartFields = [];
+
+        $isFormEncodedRequest = false;
+        $formEncodedFields = [];
 
         if (isset($methodSpec['requestBody'])) {
             $requestBody = $methodSpec['requestBody'];
@@ -515,6 +760,42 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
                     }
                 }
             }
+
+            // Handle application/x-www-form-urlencoded requests
+            if (isset($requestBodyContent['application/x-www-form-urlencoded'])) {
+                $isFormEncodedRequest = true;
+                $formEncodedSchema = $requestBodyContent['application/x-www-form-urlencoded']['schema'] ?? [];
+                $requiredFields = $formEncodedSchema['required'] ?? [];
+
+                // Mark this class as needing FormEncodedTrait
+                $classNeedsFormEncoded[$class->getName()] = true;
+
+                if (isset($formEncodedSchema['properties'])) {
+                    foreach ($formEncodedSchema['properties'] as $fieldName => $fieldSpec) {
+                        if (false === \Nette\PhpGenerator\Helpers::isIdentifier($fieldName)) {
+                            continue;
+                        }
+
+                        $isRequired = in_array($fieldName, $requiredFields, true);
+
+                        $formEncodedFields[] = [
+                            'name' => $fieldName,
+                            'required' => $isRequired,
+                            'description' => $fieldSpec['description'] ?? null,
+                        ];
+
+                        $p = new Parameter($fieldName);
+                        $p->setType(mapParameterType($fieldSpec['type'] ?? 'string'));
+                        $p->setComment($fieldSpec['description'] ?? null);
+                        $p->setNullable(!$isRequired);
+                        if (!$isRequired) {
+                            $p->setDefaultValue(null);
+                        }
+
+                        $bodyParameters[] = $p;
+                    }
+                }
+            }
         }
 
         if (isset($methodSpec['parameters'])) {
@@ -563,6 +844,29 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
             }
         }
 
+        // Auto-extract path parameters from URI pattern that are not explicitly declared
+        preg_match_all('/\{([^}]+)\}/', $path, $pathMatches);
+        if (!empty($pathMatches[1])) {
+            $declaredPathParamNames = array_merge(
+                array_map(fn($p) => $p->getName(), $pathParameters),
+                array_map(fn($p) => $p->getName(), $optionalPathParameters)
+            );
+
+            foreach ($pathMatches[1] as $pathParamName) {
+                // Skip if already declared explicitly
+                if (in_array($pathParamName, $declaredPathParamNames, true)) {
+                    continue;
+                }
+
+                // Create a required string path parameter
+                $p = (new Parameter($pathParamName))->setType('string');
+                $p->setComment("Path parameter: $pathParamName")->setNullable(false);
+
+                $pathParameters[] = $p;
+                $method->addBody(sprintf('$pathParameters[\'%s\'] = $%s;', $pathParamName, $pathParamName));
+            }
+        }
+
         $method
             ->addBody('')
             ->addBody('// build URI through path and query parameters')
@@ -580,15 +884,24 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
             foreach ($multipartFields as $field) {
                 $fieldName = $field['name'];
                 $isBinary = $field['binary'];
+                $isRequired = $field['required'];
 
                 if ($isBinary) {
-                    $method->addBody(sprintf('if ($%s !== null) {', $fieldName));
-                    $method->addBody(sprintf('    $multipartFields[\'%s\'] = [\'contents\' => $%s, \'filename\' => \'%s\'];', $fieldName, $fieldName, $fieldName));
-                    $method->addBody('}');
+                    if ($isRequired) {
+                        $method->addBody(sprintf('$multipartFields[\'%s\'] = [\'contents\' => $%s, \'filename\' => \'%s\'];', $fieldName, $fieldName, $fieldName));
+                    } else {
+                        $method->addBody(sprintf('if ($%s !== null) {', $fieldName));
+                        $method->addBody(sprintf('    $multipartFields[\'%s\'] = [\'contents\' => $%s, \'filename\' => \'%s\'];', $fieldName, $fieldName, $fieldName));
+                        $method->addBody('}');
+                    }
                 } else {
-                    $method->addBody(sprintf('if ($%s !== null) {', $fieldName));
-                    $method->addBody(sprintf('    $multipartFields[\'%s\'] = $%s;', $fieldName, $fieldName));
-                    $method->addBody('}');
+                    if ($isRequired) {
+                        $method->addBody(sprintf('$multipartFields[\'%s\'] = $%s;', $fieldName, $fieldName));
+                    } else {
+                        $method->addBody(sprintf('if ($%s !== null) {', $fieldName));
+                        $method->addBody(sprintf('    $multipartFields[\'%s\'] = $%s;', $fieldName, $fieldName));
+                        $method->addBody('}');
+                    }
                 }
             }
 
@@ -596,6 +909,23 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
             $method->addBody('$multipart = $this->createMultipartStream($multipartFields);');
             $method->addBody('$request = $request->withHeader(\'Content-Type\', \'multipart/form-data; boundary=\' . $multipart[\'boundary\']);');
             $method->addBody('$request = $request->withBody($multipart[\'stream\']);');
+        } elseif ($isFormEncodedRequest && count($formEncodedFields) > 0) {
+            // Generate form-urlencoded data construction
+            $method->addBody('');
+            $method->addBody('// Build form-urlencoded data');
+            $method->addBody('$formFields = [];');
+
+            foreach ($formEncodedFields as $field) {
+                $fieldName = $field['name'];
+                $method->addBody(sprintf('if ($%s !== null) {', $fieldName));
+                $method->addBody(sprintf('    $formFields[\'%s\'] = $%s;', $fieldName, $fieldName));
+                $method->addBody('}');
+            }
+
+            $method->addBody('');
+            $method->addBody('$formEncoded = $this->createFormEncodedBody($formFields);');
+            $method->addBody('$request = $request->withHeader(\'Content-Type\', $formEncoded[\'contentType\']);');
+            $method->addBody('$request = $request->withBody($formEncoded[\'body\']);');
         } elseif (count($bodyParameters) > 0) {
             $method->addBody('$request = $request->withBody($this->streamFactory->createStream(json_encode($requestBody) ?? \'\'));');
         }
@@ -629,8 +959,15 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
 
         $hasPrimitiveOnlyResponse = false;
         $hasModelResponse = false;
+        $hasBinaryResponse = false;
+        $hasTextResponse = false;
+        $hasVoidResponse = false;
+        $voidStatusCodes = [];
+        $binaryMediaTypes = [];
 
         foreach ($methodSpec['responses'] as $responseCode => $responseSpec) {
+            $responseCode = (int) $responseCode;
+            // Handle $ref responses (reference to components)
             if (isset($responseSpec['$ref'])) {
                 $hasModelResponse = true;
                 $responseClass = '';
@@ -642,22 +979,46 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
                     $responseClass = $modelNamespaceName . '\\' . $responseSpec['$ref'];
                 }
 
-            } else {
-                // focus on json
-                if (!isset($responseSpec['content']['application/json'])) {
-                    continue;
+                addReturnType($method, $responseClass);
+                $method->addBody(sprintf('$map[%d] = \\%s::class;', $responseCode, $responseClass));
+                continue;
+            }
+
+            // Detect media type for this response
+            $mediaTypeInfo = detectResponseMediaType($responseSpec);
+
+            // Handle binary responses
+            if ($mediaTypeInfo['type'] === 'binary') {
+                $hasBinaryResponse = true;
+                if ($mediaTypeInfo['mediaType'] !== null) {
+                    $binaryMediaTypes[] = $mediaTypeInfo['mediaType'];
                 }
+                addReturnType($method, '\\CedricZiel\\MattermostPhp\\Client\\Response\\BinaryResponse');
+                continue;
+            }
+
+            // Handle text responses
+            if ($mediaTypeInfo['type'] === 'text') {
+                $hasTextResponse = true;
+                addReturnType($method, '\\CedricZiel\\MattermostPhp\\Client\\Response\\TextResponse');
+                continue;
+            }
+
+            // Handle void/empty responses (success with no body)
+            if ($mediaTypeInfo['type'] === 'void' && $responseCode < 400) {
+                $hasVoidResponse = true;
+                $voidStatusCodes[] = $responseCode;
+                $method->addBody(sprintf('$map[%d] = null; // Void response', $responseCode));
+                continue;
+            }
+
+            // Handle JSON responses
+            if ($mediaTypeInfo['type'] === 'json' || isset($responseSpec['content']['application/json'])) {
                 if (isset($responseSpec['content']['application/json']['schema']['$ref'])) {
                     $hasModelResponse = true;
                     $responseClass = $modelNamespaceName . '\\' . str_replace('#/components/schemas/', '', $responseSpec['content']['application/json']['schema']['$ref']);
                     $method->addBody(sprintf('$map[%d] = \\%s::class;', $responseCode, $responseClass));
-                    if ($method->getReturnType() === null) {
-                        $method->setReturnType($responseClass);
-                    } else {
-                        $returnType = $method->getReturnType();
-                        $method->setReturnType($returnType . '|' . $responseClass);
-                    }
-
+                    addReturnType($method, $responseClass);
                     continue;
                 }
 
@@ -667,16 +1028,25 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
                         $responseClass = $modelNamespaceName . '\\' . str_replace('#/components/schemas/', '', $responseSpec['content']['application/json']['schema']['items']['$ref']);
                         $method->addBody(sprintf('$map[%d] = \\%s::class . \'[]\';', $responseCode, $responseClass));
                         $method->addComment('@return \\' . $responseClass . '[]');
-                        if ($method->getReturnType() === null) {
-                            $method->setReturnType('array');
-                        } else {
-                            $returnType = $method->getReturnType();
-                            $method->setReturnType($returnType . '|' . 'array');
-                        }
-
+                        addReturnType($method, 'array');
                         continue;
                     }
-
+                    // Check for primitive array items (string[], int[], etc.)
+                    $itemsType = $responseSpec['content']['application/json']['schema']['items']['type'] ?? null;
+                    if (in_array($itemsType, ['string', 'integer', 'number', 'boolean'], true)) {
+                        $hasPrimitiveOnlyResponse = true;
+                        addReturnType($method, 'array');
+                        // Add primitive array type mapping for mapResponse()
+                        $primitiveArrayType = match($itemsType) {
+                            'string' => 'string[]',
+                            'integer' => 'int[]',
+                            'number' => 'float[]',
+                            'boolean' => 'bool[]',
+                            default => 'array',
+                        };
+                        $method->addBody(sprintf("\$map[%d] = '%s';", $responseCode, $primitiveArrayType));
+                        continue;
+                    }
                     continue;
                 }
 
@@ -685,13 +1055,7 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
                     $responseClass = $modelNamespaceName . '\\' . ucfirst($methodSpec['operationId']) . 'Response';
                     $class = createClassFromSchema($modelNamespace, ucfirst($methodSpec['operationId']) . 'Response', $responseSpec['content']['application/json']['schema']);
                     $method->addBody(sprintf('$map[%d] = \\%s::class;', $responseCode, $responseClass));
-                    if ($method->getReturnType() === null) {
-                        $method->setReturnType($responseClass);
-                    } else {
-                        $returnType = $method->getReturnType();
-                        $method->setReturnType($returnType . '|' . $responseClass);
-                    }
-
+                    addReturnType($method, $responseClass);
                     continue;
                 }
 
@@ -700,39 +1064,101 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
                 if (in_array($schemaType, ['string', 'integer', 'number', 'boolean'], true)) {
                     $hasPrimitiveOnlyResponse = true;
                     $primitiveType = mapParameterType($schemaType);
-                    if ($method->getReturnType() === null) {
-                        $method->setReturnType($primitiveType);
-                    } else {
-                        $returnType = $method->getReturnType();
-                        $method->setReturnType($returnType . '|' . $primitiveType);
-                    }
-                    // No response mapping needed for primitives - just return decoded JSON
+                    addReturnType($method, $primitiveType);
+                    // Add primitive type mapping for mapResponse()
+                    $primitiveMapType = match($schemaType) {
+                        'string' => 'string',
+                        'integer' => 'int',
+                        'number' => 'float',
+                        'boolean' => 'bool',
+                        default => 'string',
+                    };
+                    $method->addBody(sprintf("\$map[%d] = '%s';", $responseCode, $primitiveMapType));
                     continue;
                 }
 
-                // Skip responses with empty or undefined schemas (incomplete spec definitions)
+                // Skip responses with empty or undefined schemas
                 if (!isset($responseSpec['content']['application/json']['schema'])
                     || empty($responseSpec['content']['application/json']['schema'])) {
                     continue;
                 }
 
                 $responseClass = $modelNamespaceName . '\\' . $methodSpec['operationId'] . 'Response';
+                addReturnType($method, $responseClass);
+                $method->addBody(sprintf('$map[%d] = \\%s::class;', $responseCode, $responseClass));
             }
-            if ($method->getReturnType() === null) {
-                $method->setReturnType($responseClass);
-            } else {
-                $returnType = $method->getReturnType();
-                $method->setReturnType($returnType . '|' . $responseClass);
+        }
+
+        // Fallback: detect binary endpoints with no success response defined
+        // OR primitive-only responses that are actually binary (OpenAPI spec incorrectly defines them as string)
+        // Check operation summary/description for binary content hints
+        if (!$hasBinaryResponse && !$hasTextResponse && !$hasVoidResponse) {
+            $summary = strtolower($methodSpec['summary'] ?? '');
+            $description = strtolower($methodSpec['description'] ?? '');
+            $combinedText = $summary . ' ' . $description;
+
+            // Binary content indicators
+            $binaryKeywords = ['file', 'thumbnail', 'preview', 'download', 'icon', 'image', 'binary', 'export', 'pdf'];
+            $isBinaryEndpoint = false;
+
+            foreach ($binaryKeywords as $keyword) {
+                if (str_contains($combinedText, $keyword)) {
+                    // Exclude "file_id" parameter references
+                    if ($keyword === 'file' && str_contains($combinedText, 'file_id')) {
+                        // Also check for actual file content hints
+                        if (str_contains($combinedText, 'get a file') ||
+                            str_contains($combinedText, 'gets a file') ||
+                            str_contains($combinedText, 'download')) {
+                            $isBinaryEndpoint = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    $isBinaryEndpoint = true;
+                    break;
+                }
             }
-            $method->addBody(sprintf('$map[%d] = \\%s::class;', $responseCode, $responseClass));
+
+            if ($isBinaryEndpoint) {
+                $hasBinaryResponse = true;
+                $hasPrimitiveOnlyResponse = false; // Override - treat as binary, not primitive
+                $binaryMediaTypes[] = 'application/octet-stream';
+                addReturnType($method, '\\CedricZiel\\MattermostPhp\\Client\\Response\\BinaryResponse');
+            }
+        }
+
+        // Track if this method needs binary response handling
+        if ($hasBinaryResponse || $hasTextResponse) {
+            $methodNeedsBinaryResponse[$class->getName() . '::' . $method->getName()] = array_unique($binaryMediaTypes);
+        }
+
+        // Add null to return type if method has void responses
+        if ($hasVoidResponse) {
+            addReturnType($method, 'null');
         }
 
         // Generate appropriate return statement based on response types
-        if ($hasPrimitiveOnlyResponse && !$hasModelResponse) {
+        if ($hasPrimitiveOnlyResponse && !$hasModelResponse && !$hasBinaryResponse && !$hasTextResponse && !$hasVoidResponse) {
             // For primitive-only responses, decode JSON directly
             $method
                 ->addBody('')
                 ->addBody('return json_decode($response->getBody()->getContents(), true);');
+        } elseif ($hasBinaryResponse || $hasTextResponse) {
+            // For methods with binary/text responses, use mapResponseWithMediaTypes
+            $method->addBody('');
+            if (!empty($binaryMediaTypes)) {
+                $binaryTypesStr = "['" . implode("', '", array_unique($binaryMediaTypes)) . "']";
+                $method->addBody(sprintf('$binaryMediaTypes = %s;', $binaryTypesStr));
+                $method->addBody('');
+                $method->addBody('return $this->mapResponseWithMediaTypes($response, $map, $binaryMediaTypes);');
+            } else {
+                $method->addBody('return $this->mapResponseWithMediaTypes($response, $map);');
+            }
+        } elseif ($hasVoidResponse) {
+            // For methods with void responses, use mapResponseAllowingVoid
+            $method
+                ->addBody('')
+                ->addBody('return $this->mapResponseAllowingVoid($response, $map);');
         } else {
             $method
                 ->addBody('')
@@ -745,6 +1171,13 @@ foreach ($openApi['paths'] as $path => $pathSpec) {
 foreach ($endpointNamespace->getClasses() as $genClass) {
     if (isset($classNeedsMultipart[$genClass->getName()]) && $classNeedsMultipart[$genClass->getName()]) {
         $genClass->addTrait(\CedricZiel\MattermostPhp\Client\MultipartTrait::class);
+    }
+}
+
+// Add FormEncodedTrait to endpoint classes that need it for form-urlencoded requests
+foreach ($endpointNamespace->getClasses() as $genClass) {
+    if (isset($classNeedsFormEncoded[$genClass->getName()]) && $classNeedsFormEncoded[$genClass->getName()]) {
+        $genClass->addTrait(\CedricZiel\MattermostPhp\Client\FormEncodedTrait::class);
     }
 }
 

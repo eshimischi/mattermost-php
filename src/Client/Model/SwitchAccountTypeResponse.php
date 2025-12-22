@@ -10,13 +10,18 @@ class SwitchAccountTypeResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): SwitchAccountTypeResponse {
-        $object = new self(
-            follow_link: isset($data['follow_link']) ? $data['follow_link'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return SwitchAccountTypeResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): SwitchAccountTypeResponse
+    {
+        $data ??= [];
+
+        return new self(
+            follow_link: $data['follow_link'] ?? null,
         );
-        return $object;
     }
 }

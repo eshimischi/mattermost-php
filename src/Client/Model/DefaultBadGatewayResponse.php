@@ -7,12 +7,17 @@ namespace CedricZiel\MattermostPhp\Client\Model;
  */
 class DefaultBadGatewayResponse extends AppError
 {
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): DefaultBadGatewayResponse {
-        $object = new self(
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return DefaultBadGatewayResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): DefaultBadGatewayResponse
+    {
+        $data ??= [];
+
+        return new self(
         );
-        return $object;
     }
 }

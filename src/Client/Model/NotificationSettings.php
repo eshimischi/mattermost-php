@@ -9,13 +9,18 @@ class NotificationSettings
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): NotificationSettings {
-        $object = new self(
-            EventTargetMapping: isset($data['EventTargetMapping']) ? $data['EventTargetMapping'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return NotificationSettings The hydrated instance
+     */
+    public static function hydrate(?array $data): NotificationSettings
+    {
+        $data ??= [];
+
+        return new self(
+            EventTargetMapping: $data['EventTargetMapping'] ?? null,
         );
-        return $object;
     }
 }

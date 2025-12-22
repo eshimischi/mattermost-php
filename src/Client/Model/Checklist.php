@@ -14,15 +14,20 @@ class Checklist
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): Checklist {
-        $object = new self(
-            id: isset($data['id']) ? $data['id'] : null,
-            title: isset($data['title']) ? $data['title'] : null,
-            items: isset($data['items']) ? $data['items'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return Checklist The hydrated instance
+     */
+    public static function hydrate(?array $data): Checklist
+    {
+        $data ??= [];
+
+        return new self(
+            id: $data['id'] ?? null,
+            title: $data['title'] ?? null,
+            items: $data['items'] ?? null,
         );
-        return $object;
     }
 }

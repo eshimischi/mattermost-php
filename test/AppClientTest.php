@@ -41,7 +41,7 @@ class AppClientTest extends MattermostTestCase
         );
     }
 
-    public function testAppClientAsBotCanBeCreated()
+    public function testAppClientAsBotCanBeCreated(): void
     {
         $client = AppClient::asBot($this->createBotContext(), $this->serializer);
 
@@ -50,7 +50,7 @@ class AppClientTest extends MattermostTestCase
         self::assertEquals('https://example.com', $client->getMattermostSiteUrl());
     }
 
-    public function testAppClientAsActingUserCanBeCreated()
+    public function testAppClientAsActingUserCanBeCreated(): void
     {
         $client = AppClient::asActingUser($this->createUserContext(), $this->serializer);
 
@@ -60,7 +60,7 @@ class AppClientTest extends MattermostTestCase
         self::assertEquals('acting_user_id', $client->getUserId());
     }
 
-    public function testCanCreateTimer()
+    public function testCanCreateTimer(): void
     {
         $timer = Timer::create(new \DateTime(), new Call('/foo'));
 
@@ -71,17 +71,17 @@ class AppClientTest extends MattermostTestCase
         $appClient->createTimer($timer);
     }
 
-    public function testCanCreatePost()
+    public function testCanCreatePost(): void
     {
         $httpFactory = new HttpFactory();
 
         $c = new MockClient();
-        $channelResponse = $this->createMock('Psr\Http\Message\ResponseInterface');
+        $channelResponse = $this->createMock(\Psr\Http\Message\ResponseInterface::class);
         $channelResponse->expects(self::atLeast(1))->method('getStatusCode')->willReturn(201);
         $channelResponse->expects(self::atLeast(1))->method('getBody')->willReturn($httpFactory->createStream('{"id": "foo"}'));
         $c->addResponse($channelResponse);
 
-        $psr18Client = new Psr18Client();
+        new Psr18Client();
 
         $appClient = AppClient::asBot(
             $this->createBotContext(),
@@ -95,17 +95,17 @@ class AppClientTest extends MattermostTestCase
         self::assertEquals('foo', $post->message);
     }
 
-    public function testCanCreateDM()
+    public function testCanCreateDM(): void
     {
         $httpFactory = new HttpFactory();
 
         $c = new MockClient();
-        $channelResponse = $this->createMock('Psr\Http\Message\ResponseInterface');
+        $channelResponse = $this->createMock(\Psr\Http\Message\ResponseInterface::class);
         $channelResponse->expects(self::atLeast(1))->method('getStatusCode')->willReturn(201);
         $channelResponse->expects(self::atLeast(1))->method('getBody')->willReturn($httpFactory->createStream('{"id": "foo"}'));
         $c->addResponse($channelResponse);
 
-        $postResponse = $this->createMock('Psr\Http\Message\ResponseInterface');
+        $postResponse = $this->createMock(\Psr\Http\Message\ResponseInterface::class);
         $postResponse->expects(self::atLeast(1))->method('getStatusCode')->willReturn(201);
         $postResponse->expects(self::atLeast(1))->method('getBody')->willReturn($httpFactory->createStream('{"id": "foo"}'));
         $c->addResponse($postResponse);

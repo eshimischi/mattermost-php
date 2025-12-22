@@ -10,13 +10,18 @@ class CanUserDirectMessageResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): CanUserDirectMessageResponse {
-        $object = new self(
-            can_dm: isset($data['can_dm']) ? $data['can_dm'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return CanUserDirectMessageResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): CanUserDirectMessageResponse
+    {
+        $data ??= [];
+
+        return new self(
+            can_dm: $data['can_dm'] ?? null,
         );
-        return $object;
     }
 }

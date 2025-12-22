@@ -20,18 +20,23 @@ class ChannelSearch
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): ChannelSearch {
-        $object = new self(
-            term: isset($data['term']) ? $data['term'] : null,
-            team_ids: isset($data['team_ids']) ? $data['team_ids'] : null,
-            public: isset($data['public']) ? $data['public'] : null,
-            private: isset($data['private']) ? $data['private'] : null,
-            deleted: isset($data['deleted']) ? $data['deleted'] : null,
-            include_deleted: isset($data['include_deleted']) ? $data['include_deleted'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return ChannelSearch The hydrated instance
+     */
+    public static function hydrate(?array $data): ChannelSearch
+    {
+        $data ??= [];
+
+        return new self(
+            term: $data['term'] ?? null,
+            team_ids: $data['team_ids'] ?? null,
+            public: $data['public'] ?? null,
+            private: $data['private'] ?? null,
+            deleted: $data['deleted'] ?? null,
+            include_deleted: $data['include_deleted'] ?? null,
         );
-        return $object;
     }
 }

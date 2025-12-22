@@ -10,13 +10,18 @@ class LookupInteractiveDialogResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): LookupInteractiveDialogResponse {
-        $object = new self(
-            options: isset($data['options']) ? $data['options'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return LookupInteractiveDialogResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): LookupInteractiveDialogResponse
+    {
+        $data ??= [];
+
+        return new self(
+            options: $data['options'] ?? null,
         );
-        return $object;
     }
 }

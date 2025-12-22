@@ -14,15 +14,20 @@ class PostAcknowledgement
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): PostAcknowledgement {
-        $object = new self(
-            user_id: isset($data['user_id']) ? $data['user_id'] : null,
-            post_id: isset($data['post_id']) ? $data['post_id'] : null,
-            acknowledged_at: isset($data['acknowledged_at']) ? $data['acknowledged_at'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return PostAcknowledgement The hydrated instance
+     */
+    public static function hydrate(?array $data): PostAcknowledgement
+    {
+        $data ??= [];
+
+        return new self(
+            user_id: $data['user_id'] ?? null,
+            post_id: $data['post_id'] ?? null,
+            acknowledged_at: $data['acknowledged_at'] ?? null,
         );
-        return $object;
     }
 }

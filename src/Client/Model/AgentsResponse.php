@@ -10,13 +10,18 @@ class AgentsResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): AgentsResponse {
-        $object = new self(
-            agents: isset($data['agents']) ? $data['agents'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return AgentsResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): AgentsResponse
+    {
+        $data ??= [];
+
+        return new self(
+            agents: $data['agents'] ?? null,
         );
-        return $object;
     }
 }

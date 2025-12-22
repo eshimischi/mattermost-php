@@ -10,13 +10,18 @@ class PostsUsage
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): PostsUsage {
-        $object = new self(
-            count: isset($data['count']) ? $data['count'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return PostsUsage The hydrated instance
+     */
+    public static function hydrate(?array $data): PostsUsage
+    {
+        $data ??= [];
+
+        return new self(
+            count: $data['count'] ?? null,
         );
-        return $object;
     }
 }

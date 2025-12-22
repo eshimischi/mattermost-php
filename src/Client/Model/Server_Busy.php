@@ -12,14 +12,19 @@ class Server_Busy
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): Server_Busy {
-        $object = new self(
-            busy: isset($data['busy']) ? $data['busy'] : null,
-            expires: isset($data['expires']) ? $data['expires'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return Server_Busy The hydrated instance
+     */
+    public static function hydrate(?array $data): Server_Busy
+    {
+        $data ??= [];
+
+        return new self(
+            busy: $data['busy'] ?? null,
+            expires: $data['expires'] ?? null,
         );
-        return $object;
     }
 }

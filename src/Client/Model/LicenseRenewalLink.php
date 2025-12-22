@@ -10,13 +10,18 @@ class LicenseRenewalLink
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): LicenseRenewalLink {
-        $object = new self(
-            renewal_link: isset($data['renewal_link']) ? $data['renewal_link'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return LicenseRenewalLink The hydrated instance
+     */
+    public static function hydrate(?array $data): LicenseRenewalLink
+    {
+        $data ??= [];
+
+        return new self(
+            renewal_link: $data['renewal_link'] ?? null,
         );
-        return $object;
     }
 }

@@ -10,14 +10,19 @@ class ChannelData
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): ChannelData {
-        $object = new self(
-            channel: isset($data['channel']) ? $data['channel'] : null,
-            member: isset($data['member']) ? $data['member'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return ChannelData The hydrated instance
+     */
+    public static function hydrate(?array $data): ChannelData
+    {
+        $data ??= [];
+
+        return new self(
+            channel: $data['channel'] ?? null,
+            member: $data['member'] ?? null,
         );
-        return $object;
     }
 }

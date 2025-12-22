@@ -12,14 +12,19 @@ class UpgradeToEnterpriseStatusResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): UpgradeToEnterpriseStatusResponse {
-        $object = new self(
-            percentage: isset($data['percentage']) ? $data['percentage'] : null,
-            error: isset($data['error']) ? $data['error'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return UpgradeToEnterpriseStatusResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): UpgradeToEnterpriseStatusResponse
+    {
+        $data ??= [];
+
+        return new self(
+            percentage: $data['percentage'] ?? null,
+            error: $data['error'] ?? null,
         );
-        return $object;
     }
 }

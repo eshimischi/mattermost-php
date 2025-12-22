@@ -14,14 +14,19 @@ class IntegrityCheckResult
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): IntegrityCheckResult {
-        $object = new self(
-            data: isset($data['data']) ? $data['data'] : null,
-            err: isset($data['err']) ? $data['err'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return IntegrityCheckResult The hydrated instance
+     */
+    public static function hydrate(?array $data): IntegrityCheckResult
+    {
+        $data ??= [];
+
+        return new self(
+            data: $data['data'] ?? null,
+            err: $data['err'] ?? null,
         );
-        return $object;
     }
 }

@@ -10,13 +10,18 @@ class AccessControlPolicyCursor
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): AccessControlPolicyCursor {
-        $object = new self(
-            id: isset($data['id']) ? $data['id'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return AccessControlPolicyCursor The hydrated instance
+     */
+    public static function hydrate(?array $data): AccessControlPolicyCursor
+    {
+        $data ??= [];
+
+        return new self(
+            id: $data['id'] ?? null,
         );
-        return $object;
     }
 }

@@ -9,13 +9,18 @@ class ClusterInfo
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): ClusterInfo {
-        $object = new self(
-            items: isset($data['items']) ? $data['items'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return ClusterInfo The hydrated instance
+     */
+    public static function hydrate(?array $data): ClusterInfo
+    {
+        $data ??= [];
+
+        return new self(
+            items: isset($data['items']) ? (object) $data['items'] : null,
         );
-        return $object;
     }
 }

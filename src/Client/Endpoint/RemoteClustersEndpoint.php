@@ -207,7 +207,7 @@ class RemoteClustersEndpoint
     public function deleteRemoteCluster(
         /** Remote Cluster GUID */
         string $remote_id,
-    ): \CedricZiel\MattermostPhp\Client\Model\DefaultUnauthorizedResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultForbiddenResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultNotFoundResponse {
+    ): \CedricZiel\MattermostPhp\Client\Model\DefaultUnauthorizedResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultForbiddenResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultNotFoundResponse|null {
         $pathParameters = [];
         $queryParameters = [];
 
@@ -222,11 +222,12 @@ class RemoteClustersEndpoint
         $response = $this->httpClient->sendRequest($request);
 
         $map = [];
+        $map[204] = null; // Void response
         $map[401] = \CedricZiel\MattermostPhp\Client\Model\DefaultUnauthorizedResponse::class;
         $map[403] = \CedricZiel\MattermostPhp\Client\Model\DefaultForbiddenResponse::class;
         $map[404] = \CedricZiel\MattermostPhp\Client\Model\DefaultNotFoundResponse::class;
 
-        return $this->mapResponse($response, $map);
+        return $this->mapResponseAllowingVoid($response, $map);
     }
 
     /**
@@ -239,11 +240,14 @@ class RemoteClustersEndpoint
      * @throws \Psr\Http\Client\ClientExceptionInterface
      */
     public function generateRemoteClusterInvite(
+        /** Path parameter: remote_id */
+        string $remote_id,
         \CedricZiel\MattermostPhp\Client\Model\GenerateRemoteClusterInviteRequest $requestBody,
     ): string|\CedricZiel\MattermostPhp\Client\Model\DefaultUnauthorizedResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultForbiddenResponse {
         $pathParameters = [];
         $queryParameters = [];
 
+        $pathParameters['remote_id'] = $remote_id;
 
         // build URI through path and query parameters
         $uri = $this->buildUri('/api/v4/remotecluster/{remote_id}/generate_invite', $pathParameters, $queryParameters);
@@ -255,6 +259,7 @@ class RemoteClustersEndpoint
         $response = $this->httpClient->sendRequest($request);
 
         $map = [];
+        $map[201] = 'string';
         $map[401] = \CedricZiel\MattermostPhp\Client\Model\DefaultUnauthorizedResponse::class;
         $map[403] = \CedricZiel\MattermostPhp\Client\Model\DefaultForbiddenResponse::class;
 

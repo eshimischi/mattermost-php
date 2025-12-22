@@ -1,0 +1,1086 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Test Generator for Mattermost PHP SDK Endpoints
+ *
+ * Generates PHPUnit test files for all endpoint classes in the SDK.
+ * Uses OpenAPI spec to generate accurate HTTP method, path, and parameter assertions.
+ */
+
+use Nette\PhpGenerator\ClassType;
+use Nette\PhpGenerator\PhpNamespace;
+
+if (!is_file(dirname(__DIR__) . '/vendor/autoload.php')) {
+    throw new LogicException('Run "composer install" first.');
+}
+
+require_once dirname(__DIR__) . '/vendor/autoload.php';
+
+$printer = new Nette\PhpGenerator\PsrPrinter();
+
+// Parse command line options
+$options = getopt('', ['endpoint:', 'force', 'dry-run']);
+$filterEndpoint = $options['endpoint'] ?? null;
+$force = isset($options['force']);
+$dryRun = isset($options['dry-run']);
+
+// Load OpenAPI spec for method/path mapping
+$openApiPath = dirname(__DIR__) . '/resources/openapi.json';
+if (!file_exists($openApiPath)) {
+    throw new RuntimeException('OpenAPI spec not found at: ' . $openApiPath);
+}
+$openApi = json_decode(file_get_contents($openApiPath), true);
+
+// Build operation lookup: endpointClass::methodName => {httpMethod, path, pathParams, queryParams}
+$operationLookup = buildOperationLookup($openApi);
+
+// Get all endpoint files
+$endpointDir = dirname(__DIR__) . '/src/Client/Endpoint';
+$testDir = dirname(__DIR__) . '/test/Client/Endpoint';
+
+if (!is_dir($testDir) && !$dryRun) {
+    mkdir($testDir, 0755, true);
+}
+
+$endpointFiles = glob($endpointDir . '/*Endpoint.php');
+
+echo sprintf("Found %d endpoint files\n", count($endpointFiles));
+echo sprintf("Loaded %d operations from OpenAPI spec\n", count($operationLookup));
+
+// Methods to skip due to SDK issues (binary downloads, special response types, etc.)
+$skipMethods = [
+    // Chunked upload API - different pattern from standard multipart
+    'UploadsEndpoint' => ['uploadData', 'getUpload'],
+
+    // SystemEndpoint - various non-multipart issues
+    'SystemEndpoint' => ['generateSupportPacket', 'getSupportedTimezone', 'getClientConfig', 'getClientLicense', 'getPrevTrialLicense', 'getLogs', 'getAnalyticsOld'],
+
+    // Void responses but with special issues
+    'UsersEndpoint' => [
+        'migrateAuthToSaml',  // Requires stdClass mock data handling
+    ],
+
+    // No success type defined in OpenAPI (only error responses)
+    'ChannelsEndpoint' => ['getChannelMembersTimezones', 'getChannelMemberCountsByGroup', 'getSidebarCategoryOrderForTeamForUser', 'updateSidebarCategoryOrderForTeamForUser'],
+    'ExportsEndpoint' => ['listExports', 'downloadExport', 'deleteExport'],
+    'ImportsEndpoint' => ['listImports', 'deleteImport'],
+
+    // Empty or anonymous object schemas in OpenAPI spec (no model generated)
+    'CustomProfileAttributesEndpoint' => ['listCPAValues', 'patchCPAValues', 'patchCPAValuesForUser'],
+
+    // Remaining issues - no success response or complex objects
+    'CloudEndpoint' => ['postEndpointForCwsWebhooks'],  // No success response defined in OpenAPI
+    'InternalEndpoint' => ['getChecklistAutocomplete'],  // Complex objects, no model
+    'PlaybookRunsEndpoint' => ['addChecklistItem', 'reoderChecklistItem', 'itemRename', 'itemDelete', 'itemSetState', 'itemSetAssignee', 'itemRun'],  // Void success with error model
+    'TeamsEndpoint' => ['teamMembersMinusGroupMembers'],  // OpenAPI spec incomplete
+];
+
+// Curated test cases for specific endpoints with special handling
+$curatedTests = [
+    'BrandEndpoint' => [
+        'getBrandImage' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'image/png',
+        ],
+    ],
+    'CloudEndpoint' => [
+        'getInvoiceForSubscriptionAsPdf' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'application/pdf',
+        ],
+    ],
+    'UsersEndpoint' => [
+        'login' => [
+            'testNoAuthHeader' => true,
+            'description' => 'login does not require auth header',
+        ],
+        'getProfileImage' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'image/png',
+        ],
+    ],
+    'FilesEndpoint' => [
+        'uploadFile' => [
+            'testMultipart' => true,
+        ],
+        'getFile' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'application/octet-stream',
+        ],
+        'getFileThumbnail' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'image/png',
+        ],
+        'getFilePreview' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'image/png',
+        ],
+        'getFilePublic' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'application/octet-stream',
+        ],
+    ],
+    'JobsEndpoint' => [
+        'downloadJob' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'application/octet-stream',
+        ],
+    ],
+    'TeamsEndpoint' => [
+        'getTeamIcon' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'image/png',
+        ],
+        'setTeamIcon' => [
+            'testMultipart' => true,
+        ],
+    ],
+    'EmojiEndpoint' => [
+        'getEmojiImage' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'image/png',
+        ],
+        'createEmoji' => [
+            'testMultipart' => true,
+        ],
+    ],
+    'LogsEndpoint' => [
+        'downloadSystemLogs' => [
+            'testTextResponse' => true,
+            'contentType' => 'text/plain',
+        ],
+    ],
+    'BrandEndpoint' => [
+        'getBrandImage' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'image/png',
+        ],
+        'uploadBrandImage' => [
+            'testMultipart' => true,
+        ],
+    ],
+    'BotsEndpoint' => [
+        'getBotIconImage' => [
+            'testBinaryResponse' => true,
+            'contentType' => 'image/png',
+        ],
+        'setBotIconImage' => [
+            'testMultipart' => true,
+        ],
+    ],
+    'SAMLEndpoint' => [
+        'getSamlMetadataFromIdp' => [
+            'testTextResponse' => true,
+            'contentType' => 'text/plain',
+        ],
+        'uploadSamlIdpCertificate' => [
+            'testMultipart' => true,
+        ],
+        'uploadSamlPublicCertificate' => [
+            'testMultipart' => true,
+        ],
+        'uploadSamlPrivateCertificate' => [
+            'testMultipart' => true,
+        ],
+    ],
+    'PluginsEndpoint' => [
+        'uploadPlugin' => [
+            'testMultipart' => true,
+        ],
+    ],
+    'SystemEndpoint' => [
+        'uploadLicenseFile' => [
+            'testMultipart' => true,
+        ],
+    ],
+    'LDAPEndpoint' => [
+        'uploadLdapPublicCertificate' => [
+            'testMultipart' => true,
+        ],
+        'uploadLdapPrivateCertificate' => [
+            'testMultipart' => true,
+        ],
+    ],
+];
+
+$generated = 0;
+$skipped = 0;
+
+foreach ($endpointFiles as $endpointFile) {
+    $endpointClass = basename($endpointFile, '.php');
+
+    // Filter if specified
+    if ($filterEndpoint && $endpointClass !== $filterEndpoint) {
+        continue;
+    }
+
+    $testFile = $testDir . '/' . $endpointClass . 'Test.php';
+
+    // Skip if test file exists and not forcing
+    if (file_exists($testFile) && !$force) {
+        echo "Skipping $endpointClass (test file exists, use --force to overwrite)\n";
+        $skipped++;
+        continue;
+    }
+
+    echo "Generating tests for $endpointClass...\n";
+
+    // Load and reflect the endpoint class
+    $fqcn = 'CedricZiel\\MattermostPhp\\Client\\Endpoint\\' . $endpointClass;
+
+    try {
+        $reflection = new ReflectionClass($fqcn);
+    } catch (ReflectionException $e) {
+        echo "  Error: Could not load $fqcn\n";
+        continue;
+    }
+
+    // Generate test class
+    $testContent = generateEndpointTest(
+        $endpointClass,
+        $reflection,
+        $curatedTests[$endpointClass] ?? [],
+        $skipMethods[$endpointClass] ?? [],
+        $operationLookup
+    );
+
+    if ($dryRun) {
+        echo "Would write: $testFile\n";
+        echo substr($testContent, 0, 500) . "...\n\n";
+    } else {
+        file_put_contents($testFile, $testContent);
+        echo "  Created: $testFile\n";
+    }
+
+    $generated++;
+}
+
+echo sprintf("\nGenerated: %d, Skipped: %d\n", $generated, $skipped);
+
+/**
+ * Build operation lookup from OpenAPI spec.
+ *
+ * @return array<string, array{httpMethod: string, path: string, pathParams: array, queryParams: array, successStatus: int}>
+ */
+function buildOperationLookup(array $openApi): array
+{
+    $lookup = [];
+
+    foreach ($openApi['paths'] as $path => $pathSpec) {
+        foreach ($pathSpec as $httpMethod => $methodSpec) {
+            // Skip non-HTTP method entries
+            if (!in_array($httpMethod, ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'], true)) {
+                continue;
+            }
+
+            if (!is_array($methodSpec) || !isset($methodSpec['operationId']) || !isset($methodSpec['tags'][0])) {
+                continue;
+            }
+
+            $tag = $methodSpec['tags'][0];
+            $endpointClass = str_replace(' ', '', ucwords(str_replace('-', ' ', $tag))) . 'Endpoint';
+            $methodName = lcfirst($methodSpec['operationId']);
+
+            $pathParams = [];
+            $queryParams = [];
+            $bodySchema = null;
+            $successStatus = 200;
+
+            // Extract parameters
+            if (isset($methodSpec['parameters'])) {
+                foreach ($methodSpec['parameters'] as $param) {
+                    $paramName = $param['name'];
+                    $paramType = $param['schema']['type'] ?? 'string';
+                    $isRequired = $param['required'] ?? false;
+
+                    if ($param['in'] === 'path') {
+                        $pathParams[$paramName] = [
+                            'type' => $paramType,
+                            'required' => true, // path params are always required
+                        ];
+                    } elseif ($param['in'] === 'query') {
+                        $queryParams[$paramName] = [
+                            'type' => $paramType,
+                            'required' => $isRequired,
+                        ];
+                    }
+                }
+            }
+
+            // Auto-extract path parameters from URI pattern that are not explicitly declared
+            preg_match_all('/\{([^}]+)\}/', $path, $pathMatches);
+            if (!empty($pathMatches[1])) {
+                foreach ($pathMatches[1] as $pathParamName) {
+                    if (!isset($pathParams[$pathParamName])) {
+                        $pathParams[$pathParamName] = [
+                            'type' => 'string',
+                            'required' => true,
+                        ];
+                    }
+                }
+            }
+
+            // Extract request body schema
+            if (isset($methodSpec['requestBody']['content']['application/json']['schema'])) {
+                $bodySchema = $methodSpec['requestBody']['content']['application/json']['schema'];
+            }
+
+            // Extract success status code from responses
+            if (isset($methodSpec['responses'])) {
+                foreach ($methodSpec['responses'] as $statusCode => $response) {
+                    $code = (int) $statusCode;
+                    if ($code >= 200 && $code < 300) {
+                        $successStatus = $code;
+                        break;
+                    }
+                }
+            }
+
+            $key = $endpointClass . '::' . $methodName;
+            $lookup[$key] = [
+                'httpMethod' => strtoupper($httpMethod),
+                'path' => $path,
+                'pathParams' => $pathParams,
+                'queryParams' => $queryParams,
+                'bodySchema' => $bodySchema,
+                'successStatus' => $successStatus,
+            ];
+        }
+    }
+
+    return $lookup;
+}
+
+/**
+ * Get the success return type from a method's union return type.
+ * Filters out Default* error response types.
+ *
+ * @return array{type: ?string, isArray: bool, isVoid: bool}
+ */
+function getSuccessReturnType(ReflectionMethod $method): array
+{
+    $returnType = $method->getReturnType();
+    $isArray = false;
+    $hasNullType = false;
+
+    if ($returnType === null) {
+        return ['type' => null, 'isArray' => false, 'isVoid' => false];
+    }
+
+    if ($returnType instanceof ReflectionUnionType) {
+        foreach ($returnType->getTypes() as $type) {
+            if ($type instanceof ReflectionNamedType) {
+                $typeName = $type->getName();
+
+                // Check for null in union type (indicates void response)
+                if ($typeName === 'null') {
+                    $hasNullType = true;
+                    continue;
+                }
+
+                // Check if this is an array return type
+                if ($typeName === 'array') {
+                    $isArray = true;
+                    continue;
+                }
+
+                // Skip error response types
+                if (!str_contains($typeName, 'Default') &&
+                    !str_contains($typeName, 'AppError')) {
+                    return ['type' => $typeName, 'isArray' => $isArray, 'isVoid' => false];
+                }
+            }
+        }
+
+        // Only null/error types found - this is a void method
+        if ($hasNullType) {
+            return ['type' => null, 'isArray' => false, 'isVoid' => true];
+        }
+    } elseif ($returnType instanceof ReflectionNamedType) {
+        $typeName = $returnType->getName();
+        // Handle explicit null return type (void response)
+        if ($typeName === 'null') {
+            return ['type' => null, 'isArray' => false, 'isVoid' => true];
+        }
+        if ($typeName === 'array') {
+            return ['type' => null, 'isArray' => true, 'isVoid' => false];
+        }
+        // Check if it's an error-only nullable type (e.g., Default500Response|null)
+        // PHP represents this as ReflectionNamedType with allowsNull=true
+        if ($returnType->allowsNull() &&
+            (str_contains($typeName, 'Default') || str_contains($typeName, 'AppError'))) {
+            return ['type' => null, 'isArray' => false, 'isVoid' => true];
+        }
+        if (!str_contains($typeName, 'Default') && !str_contains($typeName, 'AppError')) {
+            return ['type' => $typeName, 'isArray' => false, 'isVoid' => false];
+        }
+    }
+
+    return ['type' => null, 'isArray' => $isArray, 'isVoid' => false];
+}
+
+/**
+ * Check if a model class has a hydrate() method.
+ */
+function modelHasHydrate(string $modelClass): bool
+{
+    try {
+        $reflection = new ReflectionClass($modelClass);
+        return $reflection->hasMethod('hydrate');
+    } catch (ReflectionException $e) {
+        return false;
+    }
+}
+
+/**
+ * Generate mock data for a model class based on its constructor parameters.
+ */
+function getModelMockData(string $modelClass): array
+{
+    try {
+        $reflection = new ReflectionClass($modelClass);
+    } catch (ReflectionException $e) {
+        return ['status' => 'ok'];
+    }
+
+    // Check if the model has hydrate method
+    if (!$reflection->hasMethod('hydrate')) {
+        return ['status' => 'ok'];
+    }
+
+    $constructor = $reflection->getConstructor();
+
+    // If no constructor or empty constructor, check parent class
+    if ($constructor === null || count($constructor->getParameters()) === 0) {
+        $parent = $reflection->getParentClass();
+        if ($parent !== false) {
+            $parentConstructor = $parent->getConstructor();
+            if ($parentConstructor !== null && count($parentConstructor->getParameters()) > 0) {
+                $constructor = $parentConstructor;
+            }
+        }
+    }
+
+    if ($constructor === null) {
+        return ['status' => 'ok'];
+    }
+
+    $params = $constructor->getParameters();
+    if (count($params) === 0) {
+        return ['status' => 'ok'];
+    }
+
+    $data = [];
+
+    foreach ($params as $param) {
+        $paramName = $param->getName();
+        $paramType = $param->getType();
+
+        if ($paramType instanceof ReflectionNamedType) {
+            $typeName = $paramType->getName();
+            $data[$paramName] = getMockValueForType($typeName, $paramName);
+        } else {
+            // No type hint, try to infer from parameter name
+            $data[$paramName] = inferMockValueFromName($paramName);
+        }
+    }
+
+    return $data;
+}
+
+/**
+ * Infer a mock value from parameter name when no type hint is available.
+ */
+function inferMockValueFromName(string $paramName): mixed
+{
+    // Common naming patterns
+    if (str_contains($paramName, 'id') || str_ends_with($paramName, '_id')) {
+        return 'test-' . $paramName;
+    }
+    if (str_contains($paramName, 'name') || str_contains($paramName, 'title')) {
+        return 'test-' . $paramName;
+    }
+    if (str_contains($paramName, 'count') || str_contains($paramName, 'num')) {
+        return 1;
+    }
+    if (str_contains($paramName, 'time') || str_contains($paramName, '_at')) {
+        return 1234567890;
+    }
+    if (str_contains($paramName, 'enabled') || str_contains($paramName, 'is_')) {
+        return true;
+    }
+    if (str_contains($paramName, 'url') || str_contains($paramName, 'link')) {
+        return 'https://example.com/' . $paramName;
+    }
+    if (str_contains($paramName, 'description') || str_contains($paramName, 'message')) {
+        return 'test-' . $paramName;
+    }
+    // Default: return null (parameter is likely optional)
+    return null;
+}
+
+/**
+ * Extract array element type from method docblock (@return Model[]).
+ */
+function extractArrayElementType(ReflectionMethod $method): ?string
+{
+    $docComment = $method->getDocComment();
+    if ($docComment === false) {
+        return null;
+    }
+
+    // Match @return \Namespace\Model[] or Model[]
+    if (preg_match('/@return\s+\\\\?([A-Za-z0-9_\\\\]+)\[\]/', $docComment, $matches)) {
+        $className = $matches[1];
+        // Resolve to fully qualified name if needed
+        if (!str_starts_with($className, 'CedricZiel')) {
+            $className = 'CedricZiel\\MattermostPhp\\Client\\Model\\' . $className;
+        }
+        return $className;
+    }
+
+    return null;
+}
+
+/**
+ * Generate mock data for a Request model class.
+ */
+function getRequestModelMockData(string $modelClass): ?array
+{
+    try {
+        $reflection = new ReflectionClass($modelClass);
+    } catch (ReflectionException $e) {
+        return null;
+    }
+
+    $constructor = $reflection->getConstructor();
+    if ($constructor === null) {
+        return [];
+    }
+
+    $params = $constructor->getParameters();
+    $data = [];
+
+    foreach ($params as $param) {
+        $paramName = $param->getName();
+        $paramType = $param->getType();
+
+        // Skip optional params for simplicity
+        if ($param->isOptional()) {
+            continue;
+        }
+
+        if ($paramType instanceof ReflectionNamedType) {
+            $typeName = $paramType->getName();
+            $data[$paramName] = getMockValueForType($typeName, $paramName);
+        } else {
+            $data[$paramName] = 'test-' . $paramName;
+        }
+    }
+
+    return $data;
+}
+
+/**
+ * Get a mock value for a given type.
+ */
+function getMockValueForType(string $typeName, string $paramName): mixed
+{
+    return match ($typeName) {
+        'string' => 'test-' . $paramName,
+        'int' => 1234567890,
+        'float' => 123.45,
+        'bool' => true,
+        'array' => [],
+        'stdClass' => new stdClass(),
+        default => null,
+    };
+}
+
+/**
+ * Convert mock data array to PHP code string.
+ */
+function mockDataToCode(mixed $data, bool $isArrayOfItems = false): string
+{
+    // Handle primitive scalar types
+    if (is_string($data)) {
+        return "'$data'";
+    }
+    if (is_int($data) || is_float($data)) {
+        return (string) $data;
+    }
+    if (is_bool($data)) {
+        return $data ? 'true' : 'false';
+    }
+
+    // Handle arrays
+    if (!is_array($data)) {
+        return "''";  // Fallback
+    }
+
+    if ($isArrayOfItems && isset($data[0]) && is_array($data[0])) {
+        $innerCode = mockDataToCode($data[0], false);
+        return '[' . $innerCode . ']';
+    }
+
+    // Handle primitive arrays (e.g., ['item1', 'item2'])
+    if (isset($data[0]) && !is_array($data[0])) {
+        $items = [];
+        foreach ($data as $value) {
+            if (is_string($value)) {
+                $items[] = "'$value'";
+            } elseif (is_int($value) || is_float($value)) {
+                $items[] = (string) $value;
+            } elseif (is_bool($value)) {
+                $items[] = $value ? 'true' : 'false';
+            }
+        }
+        return '[' . implode(', ', $items) . ']';
+    }
+
+    // Handle associative arrays (model data)
+    $parts = [];
+    foreach ($data as $key => $value) {
+        if ($value === null) {
+            continue;
+        }
+        if (is_string($value)) {
+            $parts[] = "'$key' => '$value'";
+        } elseif (is_int($value) || is_float($value)) {
+            $parts[] = "'$key' => $value";
+        } elseif (is_bool($value)) {
+            $parts[] = "'$key' => " . ($value ? 'true' : 'false');
+        } elseif (is_array($value)) {
+            $parts[] = "'$key' => []";
+        }
+    }
+    return '[' . implode(', ', $parts) . ']';
+}
+
+/**
+ * Get the short class name from a FQCN.
+ */
+function getShortClassName(string $fqcn): string
+{
+    $parts = explode('\\', $fqcn);
+    return end($parts);
+}
+
+/**
+ * Build expected path with test values substituted.
+ * Note: OpenAPI paths already include /api/v4 prefix.
+ */
+function buildExpectedPath(string $path, array $pathParams, array $testValues): string
+{
+    $result = $path;
+    foreach ($pathParams as $paramName => $paramInfo) {
+        $testValue = $testValues[$paramName] ?? 'test-' . $paramName;
+        $result = str_replace('{' . $paramName . '}', $testValue, $result);
+    }
+    return $result;
+}
+
+/**
+ * Generate a test class for an endpoint.
+ */
+function generateEndpointTest(
+    string $endpointClass,
+    ReflectionClass $reflection,
+    array $curatedTests,
+    array $methodsToSkip,
+    array $operationLookup
+): string {
+    global $printer;
+
+    $namespace = new PhpNamespace('CedricZiel\\MattermostPhp\\Test\\Client\\Endpoint');
+    $endpointFqcn = 'CedricZiel\\MattermostPhp\\Client\\Endpoint\\' . $endpointClass;
+
+    // Collect model classes used in tests for UsesClass attributes
+    $usedModels = [];
+
+    // Add imports
+    $namespace->addUse($endpointFqcn);
+    $namespace->addUse('CedricZiel\\MattermostPhp\\Test\\Client\\ClientTestCase');
+    $namespace->addUse('PHPUnit\\Framework\\Attributes\\CoversClass');
+    $namespace->addUse('PHPUnit\\Framework\\Attributes\\Test');
+
+    $class = $namespace->addClass($endpointClass . 'Test')
+        ->setExtends('CedricZiel\\MattermostPhp\\Test\\Client\\ClientTestCase');
+
+    // Add CoversClass attribute
+    $class->addAttribute('PHPUnit\\Framework\\Attributes\\CoversClass', [new Nette\PhpGenerator\Literal($endpointClass . '::class')]);
+
+    // Add property for the endpoint
+    $class->addProperty('endpoint')
+        ->setType('CedricZiel\\MattermostPhp\\Client\\Endpoint\\' . $endpointClass);
+
+    // Add setUp method
+    $setUp = $class->addMethod('setUp')
+        ->setProtected()
+        ->setReturnType('void');
+    $setUp->addBody('parent::setUp();');
+    $setUp->addBody('$this->endpoint = new ' . $endpointClass . '(');
+    $setUp->addBody('    $this->baseUrl,');
+    $setUp->addBody('    $this->token,');
+    $setUp->addBody('    $this->mockClient,');
+    $setUp->addBody('    new \\GuzzleHttp\\Psr7\\HttpFactory(),');
+    $setUp->addBody('    $this->streamFactory,');
+    $setUp->addBody(');');
+
+    // Trait methods to skip
+    $traitMethods = [
+        'buildUri',
+        'setHttpClient',
+        'setRequestFactory',
+        'setStreamFactory',
+        'setBaseUrl',
+        'setToken',
+    ];
+
+    // Get public methods
+    $methods = $reflection->getMethods(ReflectionMethod::IS_PUBLIC);
+    $testsGenerated = 0;
+
+    foreach ($methods as $method) {
+        $methodName = $method->getName();
+
+        // Skip constructor, setters, and known trait/utility methods
+        if ($method->isConstructor() ||
+            str_starts_with($methodName, 'set') ||
+            in_array($methodName, $traitMethods, true) ||
+            in_array($methodName, $methodsToSkip, true) ||
+            $method->getDeclaringClass()->getName() !== $reflection->getName()) {
+            continue;
+        }
+
+        $curatedConfig = $curatedTests[$methodName] ?? [];
+
+        // Get OpenAPI operation info
+        $operationKey = $endpointClass . '::' . $methodName;
+        $operationInfo = $operationLookup[$operationKey] ?? null;
+
+        // Generate basic test
+        $result = generateMethodTest($class, $method, $curatedConfig, $namespace, $operationInfo);
+        if ($result !== false) {
+            $testsGenerated++;
+            if (is_string($result)) {
+                $usedModels[$result] = true;
+            }
+        }
+    }
+
+    // Add UsesClass attributes for models
+    foreach (array_keys($usedModels) as $modelClass) {
+        if (in_array($modelClass, ['int', 'string', 'bool', 'float', 'array', 'object', 'mixed', 'ok'], true)) {
+            continue;
+        }
+        if (!str_contains($modelClass, '\\')) {
+            continue;
+        }
+        $shortName = getShortClassName($modelClass);
+        $namespace->addUse($modelClass);
+        $class->addAttribute('PHPUnit\\Framework\\Attributes\\UsesClass', [new Nette\PhpGenerator\Literal($shortName . '::class')]);
+    }
+
+    // If no tests were generated, add a placeholder test
+    if ($testsGenerated === 0) {
+        $placeholder = $class->addMethod('endpointCanBeInstantiated')
+            ->setPublic()
+            ->setReturnType('void')
+            ->addAttribute('PHPUnit\\Framework\\Attributes\\Test');
+        $placeholder->addBody('$this->assertInstanceOf(' . $endpointClass . '::class, $this->endpoint);');
+    }
+
+    // Build the file content
+    $file = "<?php\n\ndeclare(strict_types=1);\n\n";
+    $file .= $printer->printNamespace($namespace);
+
+    return $file;
+}
+
+/**
+ * Generate a test method for an endpoint method.
+ *
+ * @return false|string False if skipped, or the model class name used
+ */
+function generateMethodTest(
+    ClassType $class,
+    ReflectionMethod $method,
+    array $curatedConfig,
+    PhpNamespace $namespace,
+    ?array $operationInfo
+): false|string {
+    $methodName = $method->getName();
+    $testName = $methodName . 'BuildsCorrectRequest';
+
+    $test = $class->addMethod($testName)
+        ->setPublic()
+        ->setReturnType('void')
+        ->addAttribute('PHPUnit\\Framework\\Attributes\\Test');
+
+    // Analyze parameters
+    $params = $method->getParameters();
+    $paramSetup = [];
+    $argList = [];
+    $testValues = []; // Track test values for path substitution
+
+    foreach ($params as $param) {
+        $paramName = $param->getName();
+        $paramType = $param->getType();
+
+        if ($paramType instanceof ReflectionNamedType) {
+            $typeName = $paramType->getName();
+
+            // Handle Request model objects
+            if (str_contains($typeName, 'Request')) {
+                $requestMockData = getRequestModelMockData($typeName);
+                if ($requestMockData !== null && !empty($requestMockData)) {
+                    $shortName = getShortClassName($typeName);
+                    $namespace->addUse($typeName);
+                    $constructorArgs = [];
+                    foreach ($requestMockData as $key => $value) {
+                        if (is_string($value)) {
+                            $constructorArgs[] = "$key: '$value'";
+                        } elseif (is_int($value) || is_float($value)) {
+                            $constructorArgs[] = "$key: $value";
+                        } elseif (is_bool($value)) {
+                            $constructorArgs[] = "$key: " . ($value ? 'true' : 'false');
+                        } elseif (is_array($value)) {
+                            $constructorArgs[] = "$key: []";
+                        } elseif ($value instanceof stdClass) {
+                            $constructorArgs[] = "$key: new \\stdClass()";
+                        }
+                    }
+                    $paramSetup[] = sprintf('$%s = new \\%s(%s);', $paramName, $typeName, implode(', ', $constructorArgs));
+                    $argList[] = '$' . $paramName;
+                    continue;
+                }
+                // Can't generate mock data, skip param
+                if (!$param->isOptional()) {
+                    // Required param we can't fill - skip this test
+                    $class->removeMethod($testName);
+                    return false;
+                }
+                $argList[] = 'null';
+                continue;
+            }
+
+            switch ($typeName) {
+                case 'string':
+                    $testValue = 'test-' . $paramName;
+                    $paramSetup[] = sprintf("\$%s = '%s';", $paramName, $testValue);
+                    $argList[] = '$' . $paramName;
+                    $testValues[$paramName] = $testValue;
+                    break;
+                case 'int':
+                    $paramSetup[] = sprintf('$%s = 1;', $paramName);
+                    $argList[] = '$' . $paramName;
+                    $testValues[$paramName] = '1';
+                    break;
+                case 'bool':
+                    $paramSetup[] = sprintf('$%s = true;', $paramName);
+                    $argList[] = '$' . $paramName;
+                    $testValues[$paramName] = '1'; // HTTP query string format for true
+                    break;
+                case 'array':
+                    $paramSetup[] = sprintf('$%s = [];', $paramName);
+                    $argList[] = '$' . $paramName;
+                    break;
+                case 'mixed':
+                    // For file upload parameters (mixed can be string, resource, or StreamInterface)
+                    // Use a simple string as test content
+                    $paramSetup[] = sprintf("\$%s = 'test-file-content';", $paramName);
+                    $argList[] = '$' . $paramName;
+                    break;
+                default:
+                    if (!$param->isOptional()) {
+                        $class->removeMethod($testName);
+                        return false;
+                    }
+                    $argList[] = 'null';
+            }
+        } else {
+            if (!$param->isOptional()) {
+                $class->removeMethod($testName);
+                return false;
+            }
+            $argList[] = 'null';
+        }
+    }
+
+    // Check if the success return type has hydrate()
+    $returnTypeInfo = getSuccessReturnType($method);
+    if ($returnTypeInfo['type'] !== null &&
+        str_contains($returnTypeInfo['type'], '\\') &&
+        !modelHasHydrate($returnTypeInfo['type'])) {
+        $class->removeMethod($testName);
+        return false;
+    }
+
+    // Determine response type
+    $needsBinaryResponse = $curatedConfig['testBinaryResponse'] ?? false;
+    $needsTextResponse = $curatedConfig['testTextResponse'] ?? false;
+    $noAuthHeader = $curatedConfig['testNoAuthHeader'] ?? false;
+    $isMultipart = $curatedConfig['testMultipart'] ?? false;
+
+    $successType = $returnTypeInfo['type'];
+    $isArrayReturn = $returnTypeInfo['isArray'];
+    $isVoidResponse = $returnTypeInfo['isVoid'];
+    $modelClass = null;
+    $mockData = ['status' => 'ok'];
+    $canAssertResponse = false;
+    $primitiveType = null;
+
+    if ($successType !== null && !$needsBinaryResponse && !$needsTextResponse) {
+        if (str_contains($successType, '\\') && modelHasHydrate($successType)) {
+            $modelClass = $successType;
+            $mockData = getModelMockData($successType);
+            $canAssertResponse = true;
+        } elseif (in_array($successType, ['string', 'int', 'float', 'bool'], true)) {
+            // Handle primitive scalar return types
+            $primitiveType = $successType;
+            $mockData = match($successType) {
+                'string' => 'test-response-value',
+                'int' => 42,
+                'float' => 3.14,
+                'bool' => true,
+            };
+            $canAssertResponse = true;
+        }
+    }
+
+    // For array returns without a model class, try to extract element type from docblock
+    if ($isArrayReturn && $modelClass === null && $primitiveType === null) {
+        $elementType = extractArrayElementType($method);
+        if ($elementType !== null && class_exists($elementType) && modelHasHydrate($elementType)) {
+            $modelClass = $elementType;
+            $mockData = getModelMockData($elementType);
+            $canAssertResponse = true;
+        } else {
+            // For primitive arrays (string[], int[], etc.), set appropriate mock data
+            $primitiveType = 'array';
+            $mockData = ['item1', 'item2', 'item3'];
+            $canAssertResponse = true;
+        }
+    }
+
+    if ($isArrayReturn && $primitiveType !== 'array') {
+        $mockData = [$mockData];
+    }
+
+    // Get success status code from OpenAPI spec
+    $successStatus = $operationInfo['successStatus'] ?? 200;
+
+    // Add mock response
+    if ($needsBinaryResponse) {
+        $contentType = $curatedConfig['contentType'] ?? 'application/octet-stream';
+        $test->addBody(sprintf("\$this->mockBinaryResponse(%d, 'binary-content', '%s');", $successStatus, $contentType));
+    } elseif ($needsTextResponse) {
+        $contentType = $curatedConfig['contentType'] ?? 'text/plain';
+        $test->addBody(sprintf("\$this->mockTextResponse(%d, 'text content', '%s');", $successStatus, $contentType));
+    } elseif ($isVoidResponse) {
+        $test->addBody(sprintf('$this->mockEmptyResponse(%d);', $successStatus));
+    } else {
+        $mockDataCode = mockDataToCode($mockData, $isArrayReturn);
+        $test->addBody(sprintf('$this->mockJsonResponse(%d, %s);', $successStatus, $mockDataCode));
+    }
+    $test->addBody('');
+
+    // Add parameter setup
+    foreach ($paramSetup as $setup) {
+        $test->addBody($setup);
+    }
+    if (!empty($paramSetup)) {
+        $test->addBody('');
+    }
+
+    // Call the method
+    if ($isVoidResponse) {
+        $test->addBody(sprintf('$this->endpoint->%s(%s);', $methodName, implode(', ', $argList)));
+    } else {
+        $test->addBody(sprintf('$result = $this->endpoint->%s(%s);', $methodName, implode(', ', $argList)));
+    }
+    $test->addBody('');
+
+    // Add request assertions
+    $test->addBody('$this->assertNotNull($this->getLastRequest());');
+
+    // Add HTTP method assertion
+    if ($operationInfo !== null) {
+        $test->addBody(sprintf("\$this->assertRequestMethod('%s');", $operationInfo['httpMethod']));
+
+        // Build and add path assertion
+        $expectedPath = buildExpectedPath($operationInfo['path'], $operationInfo['pathParams'], $testValues);
+        $test->addBody(sprintf("\$this->assertRequestPath('%s');", $expectedPath));
+    }
+
+    // Add auth header assertion
+    if ($noAuthHeader) {
+        $test->addBody('$this->assertRequestHasNoAuthHeader();');
+    } else {
+        $test->addBody('$this->assertRequestHasAuthHeader();');
+    }
+
+    // Add multipart assertions
+    if ($isMultipart) {
+        $test->addBody('$this->assertRequestContentTypeMultipart();');
+        // Add assertions for each mixed type parameter (these are file fields)
+        foreach ($params as $param) {
+            $paramType = $param->getType();
+            if ($paramType instanceof ReflectionNamedType && $paramType->getName() === 'mixed') {
+                $test->addBody(sprintf("\$this->assertRequestBodyHasMultipartFile('%s');", $param->getName()));
+            }
+        }
+    }
+
+    // Add query parameter assertions for non-empty query params
+    if ($operationInfo !== null && !empty($operationInfo['queryParams'])) {
+        $expectedQueryParams = [];
+        foreach ($operationInfo['queryParams'] as $paramName => $paramInfo) {
+            if (isset($testValues[$paramName])) {
+                $expectedQueryParams[$paramName] = $testValues[$paramName];
+            }
+        }
+        if (!empty($expectedQueryParams)) {
+            $queryParamCode = [];
+            foreach ($expectedQueryParams as $key => $value) {
+                $queryParamCode[] = "'$key' => '$value'";
+            }
+            $test->addBody(sprintf('$this->assertRequestQueryParams([%s]);', implode(', ', $queryParamCode)));
+        }
+    }
+
+    // Add response type assertions (skip for void - no result to assert)
+    if ($isVoidResponse) {
+        // No assertion needed - void methods don't return a value
+    } elseif ($needsBinaryResponse) {
+        $test->addBody('$this->assertInstanceOf(\\CedricZiel\\MattermostPhp\\Client\\Response\\BinaryResponse::class, $result);');
+    } elseif ($needsTextResponse) {
+        $test->addBody('$this->assertInstanceOf(\\CedricZiel\\MattermostPhp\\Client\\Response\\TextResponse::class, $result);');
+    } elseif ($canAssertResponse) {
+        if ($isArrayReturn) {
+            $test->addBody('$this->assertIsArray($result);');
+            if ($modelClass !== null) {
+                $test->addBody('$this->assertNotEmpty($result);');
+                $test->addBody(sprintf('$this->assertInstanceOf(\\%s::class, $result[0]);', $modelClass));
+            }
+        } elseif ($primitiveType !== null) {
+            // Handle primitive scalar return types
+            $assertion = match($primitiveType) {
+                'string' => 'assertIsString',
+                'int' => 'assertIsInt',
+                'float' => 'assertIsFloat',
+                'bool' => 'assertIsBool',
+                default => null,
+            };
+            if ($assertion !== null) {
+                $test->addBody(sprintf('$this->%s($result);', $assertion));
+            }
+        } elseif ($modelClass !== null) {
+            $test->addBody(sprintf('$this->assertInstanceOf(\\%s::class, $result);', $modelClass));
+        }
+    }
+
+    return $isVoidResponse ? 'void' : ($modelClass ?? ($primitiveType ?? 'ok'));
+}

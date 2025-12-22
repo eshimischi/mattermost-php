@@ -9,13 +9,18 @@ class AccessControlFieldsAutocompleteResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): AccessControlFieldsAutocompleteResponse {
-        $object = new self(
-            fields: isset($data['fields']) ? $data['fields'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return AccessControlFieldsAutocompleteResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): AccessControlFieldsAutocompleteResponse
+    {
+        $data ??= [];
+
+        return new self(
+            fields: $data['fields'] ?? null,
         );
-        return $object;
     }
 }

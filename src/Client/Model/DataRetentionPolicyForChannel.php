@@ -12,14 +12,19 @@ class DataRetentionPolicyForChannel
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): DataRetentionPolicyForChannel {
-        $object = new self(
-            channel_id: isset($data['channel_id']) ? $data['channel_id'] : null,
-            post_duration: isset($data['post_duration']) ? $data['post_duration'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return DataRetentionPolicyForChannel The hydrated instance
+     */
+    public static function hydrate(?array $data): DataRetentionPolicyForChannel
+    {
+        $data ??= [];
+
+        return new self(
+            channel_id: $data['channel_id'] ?? null,
+            post_duration: $data['post_duration'] ?? null,
         );
-        return $object;
     }
 }

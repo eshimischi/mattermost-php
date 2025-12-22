@@ -10,13 +10,18 @@ class RegenCommandTokenResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): RegenCommandTokenResponse {
-        $object = new self(
-            token: isset($data['token']) ? $data['token'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return RegenCommandTokenResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): RegenCommandTokenResponse
+    {
+        $data ??= [];
+
+        return new self(
+            token: $data['token'] ?? null,
         );
-        return $object;
     }
 }

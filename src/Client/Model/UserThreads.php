@@ -12,14 +12,19 @@ class UserThreads
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): UserThreads {
-        $object = new self(
-            total: isset($data['total']) ? $data['total'] : null,
-            threads: isset($data['threads']) ? $data['threads'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return UserThreads The hydrated instance
+     */
+    public static function hydrate(?array $data): UserThreads
+    {
+        $data ??= [];
+
+        return new self(
+            total: $data['total'] ?? null,
+            threads: $data['threads'] ?? null,
         );
-        return $object;
     }
 }

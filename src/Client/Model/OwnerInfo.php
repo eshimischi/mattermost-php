@@ -12,14 +12,19 @@ class OwnerInfo
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): OwnerInfo {
-        $object = new self(
-            user_id: isset($data['user_id']) ? $data['user_id'] : null,
-            username: isset($data['username']) ? $data['username'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return OwnerInfo The hydrated instance
+     */
+    public static function hydrate(?array $data): OwnerInfo
+    {
+        $data ??= [];
+
+        return new self(
+            user_id: $data['user_id'] ?? null,
+            username: $data['username'] ?? null,
         );
-        return $object;
     }
 }

@@ -7,12 +7,17 @@ namespace CedricZiel\MattermostPhp\Client\Model;
  */
 class DefaultTooLargeResponse extends AppError
 {
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): DefaultTooLargeResponse {
-        $object = new self(
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return DefaultTooLargeResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): DefaultTooLargeResponse
+    {
+        $data ??= [];
+
+        return new self(
         );
-        return $object;
     }
 }

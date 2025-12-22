@@ -12,14 +12,19 @@ class RetentionPolicyForChannelList
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): RetentionPolicyForChannelList {
-        $object = new self(
-            policies: isset($data['policies']) ? $data['policies'] : null,
-            total_count: isset($data['total_count']) ? $data['total_count'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return RetentionPolicyForChannelList The hydrated instance
+     */
+    public static function hydrate(?array $data): RetentionPolicyForChannelList
+    {
+        $data ??= [];
+
+        return new self(
+            policies: $data['policies'] ?? null,
+            total_count: $data['total_count'] ?? null,
         );
-        return $object;
     }
 }

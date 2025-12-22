@@ -10,13 +10,18 @@ class ValidateExpressionAgainstRequesterResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): ValidateExpressionAgainstRequesterResponse {
-        $object = new self(
-            requester_matches: isset($data['requester_matches']) ? $data['requester_matches'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return ValidateExpressionAgainstRequesterResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): ValidateExpressionAgainstRequesterResponse
+    {
+        $data ??= [];
+
+        return new self(
+            requester_matches: $data['requester_matches'] ?? null,
         );
-        return $object;
     }
 }

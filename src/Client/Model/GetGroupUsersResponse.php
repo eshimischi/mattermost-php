@@ -10,14 +10,19 @@ class GetGroupUsersResponse
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): GetGroupUsersResponse {
-        $object = new self(
-            members: isset($data['members']) ? $data['members'] : null,
-            total_member_count: isset($data['total_member_count']) ? $data['total_member_count'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return GetGroupUsersResponse The hydrated instance
+     */
+    public static function hydrate(?array $data): GetGroupUsersResponse
+    {
+        $data ??= [];
+
+        return new self(
+            members: $data['members'] ?? null,
+            total_member_count: $data['total_member_count'] ?? null,
         );
-        return $object;
     }
 }

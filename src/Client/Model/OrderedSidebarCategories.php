@@ -13,14 +13,19 @@ class OrderedSidebarCategories
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): OrderedSidebarCategories {
-        $object = new self(
-            order: isset($data['order']) ? $data['order'] : null,
-            categories: isset($data['categories']) ? $data['categories'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return OrderedSidebarCategories The hydrated instance
+     */
+    public static function hydrate(?array $data): OrderedSidebarCategories
+    {
+        $data ??= [];
+
+        return new self(
+            order: $data['order'] ?? null,
+            categories: $data['categories'] ?? null,
         );
-        return $object;
     }
 }

@@ -14,15 +14,20 @@ class PropertyFieldRequest
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): PropertyFieldRequest {
-        $object = new self(
-            name: isset($data['name']) ? $data['name'] : null,
-            type: isset($data['type']) ? $data['type'] : null,
-            attrs: isset($data['attrs']) ? $data['attrs'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return PropertyFieldRequest The hydrated instance
+     */
+    public static function hydrate(?array $data): PropertyFieldRequest
+    {
+        $data ??= [];
+
+        return new self(
+            name: $data['name'] ?? null,
+            type: $data['type'] ?? null,
+            attrs: isset($data['attrs']) ? (object) $data['attrs'] : null,
         );
-        return $object;
     }
 }

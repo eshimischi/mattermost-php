@@ -11,15 +11,20 @@ class TeamUnread
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): TeamUnread {
-        $object = new self(
-            team_id: isset($data['team_id']) ? $data['team_id'] : null,
-            msg_count: isset($data['msg_count']) ? $data['msg_count'] : null,
-            mention_count: isset($data['mention_count']) ? $data['mention_count'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return TeamUnread The hydrated instance
+     */
+    public static function hydrate(?array $data): TeamUnread
+    {
+        $data ??= [];
+
+        return new self(
+            team_id: $data['team_id'] ?? null,
+            msg_count: $data['msg_count'] ?? null,
+            mention_count: $data['mention_count'] ?? null,
         );
-        return $object;
     }
 }

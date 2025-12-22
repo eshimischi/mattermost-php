@@ -15,14 +15,19 @@ class OrphanedRecord
     ) {
     }
 
-    public static function hydrate(
-        /** @param array<string, mixed> $data */
-        ?array $data,
-    ): OrphanedRecord {
-        $object = new self(
-            parent_id: isset($data['parent_id']) ? $data['parent_id'] : null,
-            child_id: isset($data['child_id']) ? $data['child_id'] : null,
+    /**
+     * Hydrate a new instance from an array of data.
+     *
+     * @param array<string, mixed>|null $data The data to hydrate from
+     * @return OrphanedRecord The hydrated instance
+     */
+    public static function hydrate(?array $data): OrphanedRecord
+    {
+        $data ??= [];
+
+        return new self(
+            parent_id: $data['parent_id'] ?? null,
+            child_id: $data['child_id'] ?? null,
         );
-        return $object;
     }
 }
