@@ -54,7 +54,7 @@ class FilesEndpoint
         /** The name of the file to be uploaded */
         string $filename,
         /** A file to be uploaded (string|resource|\Psr\Http\Message\StreamInterface) */
-        mixed $files = null,
+        mixed $files,
         /** The ID of the channel that this file will be uploaded to */
         string $channel_id,
         /** A unique identifier for the file that will be returned in the response */
