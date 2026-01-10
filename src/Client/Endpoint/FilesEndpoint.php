@@ -56,7 +56,7 @@ class FilesEndpoint
         /** A file to be uploaded (string|resource|\Psr\Http\Message\StreamInterface) */
         mixed $files,
         /** The ID of the channel that this file will be uploaded to */
-        string $channel_id,
+        ?string $channel_id = null,
         /** A unique identifier for the file that will be returned in the response */
         ?string $client_ids = null,
     ): \CedricZiel\MattermostPhp\Client\Model\UploadFileResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultBadRequestResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultUnauthorizedResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultForbiddenResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultTooLargeResponse|\CedricZiel\MattermostPhp\Client\Model\DefaultNotImplementedResponse|\CedricZiel\MattermostPhp\Client\Response\BinaryResponse {
@@ -75,7 +75,7 @@ class FilesEndpoint
         // Build multipart form data
         $multipartFields = [];
         if ($files !== null) {
-            $file_name = pathinfo($files, PATHINFO_FILENAME);
+            $file_name = pathinfo($filename, PATHINFO_FILENAME);
             $multipartFields['files'] = ['contents' => $files, 'name' => $file_name, 'filename' => $filename];
         }
         if ($channel_id !== null) {
