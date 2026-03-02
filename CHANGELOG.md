@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.0.0](https://github.com/cedricziel/mattermost-php/compare/v1.6.0...v2.0.0) (2025-12-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* The Apps Framework has been completely removed.
+* /api/v4/permissions/ancillary changed from GET to POST
+
+### Features
+
+* add full OpenAPI media type compliance and comprehensive test suite ([#304](https://github.com/cedricziel/mattermost-php/issues/304)) ([7a017ae](https://github.com/cedricziel/mattermost-php/commit/7a017ae191e11036c3f971f1dea73089493b4383))
+* add full OpenAPI media type compliance for binary and text responses ([7a017ae](https://github.com/cedricziel/mattermost-php/commit/7a017ae191e11036c3f971f1dea73089493b4383))
+* add PHP 8.5 to build matrix ([43e08bf](https://github.com/cedricziel/mattermost-php/commit/43e08bfa86d7e31552d8652324f9a167fb345116))
+* add primitive type support to mapResponse for string/int/array returns ([7a017ae](https://github.com/cedricziel/mattermost-php/commit/7a017ae191e11036c3f971f1dea73089493b4383))
+* enable tests for multipart file upload endpoints ([7a017ae](https://github.com/cedricziel/mattermost-php/commit/7a017ae191e11036c3f971f1dea73089493b4383))
+* integrate Rector for automated code quality validation ([7a017ae](https://github.com/cedricziel/mattermost-php/commit/7a017ae191e11036c3f971f1dea73089493b4383))
+* upgrade to latest Mattermost OpenAPI v4 spec ([43e08bf](https://github.com/cedricziel/mattermost-php/commit/43e08bfa86d7e31552d8652324f9a167fb345116))
+* upgrade to latest Mattermost OpenAPI v4 spec ([#299](https://github.com/cedricziel/mattermost-php/issues/299)) ([43e08bf](https://github.com/cedricziel/mattermost-php/commit/43e08bfa86d7e31552d8652324f9a167fb345116))
+
+
+### Bug Fixes
+
+* **docs:** add Jekyll config for GitHub Pages HTML rendering ([#303](https://github.com/cedricziel/mattermost-php/issues/303)) ([1b7ea5c](https://github.com/cedricziel/mattermost-php/commit/1b7ea5c5c7d6af8b76fb06cffef0717f050b59f1))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump actions/checkout from 4 to 6 ([#308](https://github.com/cedricziel/mattermost-php/issues/308)) ([ece3f77](https://github.com/cedricziel/mattermost-php/commit/ece3f771fc6694098795e900532f0d8ae0a288c1))
+* **deps:** bump actions/configure-pages from 4 to 5 ([#306](https://github.com/cedricziel/mattermost-php/issues/306)) ([09b1251](https://github.com/cedricziel/mattermost-php/commit/09b1251d52bb6e21c08093edeec451f4a713dcfc))
+* **deps:** bump actions/upload-pages-artifact from 3 to 4 ([#307](https://github.com/cedricziel/mattermost-php/issues/307)) ([2e96d71](https://github.com/cedricziel/mattermost-php/commit/2e96d7191f76e907d9f134178e284b3cac976a28))
+* **deps:** bump peter-evans/create-pull-request from 7 to 8 ([#305](https://github.com/cedricziel/mattermost-php/issues/305)) ([075329f](https://github.com/cedricziel/mattermost-php/commit/075329f6a872fca1061bf94c0537432e64acf28b))
+
+
+### Code Refactoring
+
+* remove deprecated Mattermost Apps Framework ([#311](https://github.com/cedricziel/mattermost-php/issues/311)) ([40705a0](https://github.com/cedricziel/mattermost-php/commit/40705a04dd5b669cb070017d82d1a1e2f4214864))
+
+
+### Continuous Integration
+
+* add daily OpenAPI spec update workflow ([43e08bf](https://github.com/cedricziel/mattermost-php/commit/43e08bfa86d7e31552d8652324f9a167fb345116))
+
 ## [1.6.0](https://github.com/cedricziel/mattermost-php/compare/v1.5.0...v1.6.0) (2025-12-21)
 
 
